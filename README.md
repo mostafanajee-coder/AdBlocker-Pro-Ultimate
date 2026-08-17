@@ -1,21 +1,22 @@
-# 🛡️ Ad Blocker Pro Ultimate (v3.4.0)
+# 🛡️ Ad Blocker Pro Ultimate (v3.5.0)
 
 [![Manifest V3](https://img.shields.io/badge/Chrome-Manifest%20V3-blue.svg)](https://developer.chrome.com/docs/extensions/mv3/intro/)
 [![Tests](https://img.shields.io/badge/Tests-58%2F58%20Passing-brightgreen.svg)](tests/fb-detect.test.js)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Speed](https://img.shields.io/badge/Performance-Ultra--Fast-orange.svg)](#)
 
-A high-performance, lightweight Manifest V3 ad blocker engineered for modern Chromium browsers. Designed to replace legacy MV2 blockers with surgical precision, featuring native declarative network filtering, intelligent Facebook sponsored-post detection, in-player popunder disarming, and undetectable anti-adblock evasion.
+A high-performance, lightweight Manifest V3 ad blocker engineered for modern Chromium browsers. Designed to replace legacy MV2 blockers with surgical precision, featuring native declarative network filtering, intelligent Facebook sponsored-post detection, YouTube in-stream JSON ad stripping, in-player popunder disarming, and undetectable anti-adblock evasion.
 
 ---
 
 ## ⚡ Key Highlights & Architecture
 
-| Feature | Legacy MV2 Blockers | Ad Blocker Pro Ultimate (v3.4.0) |
+| Feature | Legacy MV2 Blockers | Ad Blocker Pro Ultimate (v3.5.0) |
 | :--- | :--- | :--- |
 | **Manifest Compatibility** | Deprecated / Disabled in Chrome 120+ | **Native Manifest V3 Compliance** |
 | **Network Filtering** | Heavy webRequest memory overhead | **Pre-compiled DeclarativeNetRequest (Core 6 Lists)** |
 | **Anti-Adblock Defusal** | Easily detected via missing global objects | **37 Web Accessible Resource Stubs (`noop.js`, `1x1.gif`)** |
+| **YouTube Ads** | Blocked with black screens or video freezes | **Native `ytInitialPlayerResponse` In-Stream JSON Stripper** |
 | **Facebook & Reels** | Broken by class obfuscation | **Sub-pixel Visual Coordinate Reconstruction** |
 | **Video Player Popunders**| Intrusive new tabs on click | **Capture-Phase Click Interceptor & Auto-Closer** |
 | **Anti-DevTools Hijacking**| Redirects on F12 / Inspect | **Hardware Key & Debugger Loop Neutralizer** |
@@ -33,22 +34,27 @@ Ad Blocker Pro Ultimate incorporates the official, clean core filter lists from 
 * **`ublock-badware.json`**: Protection against forced redirects, phishing, and scam domains.
 * **`urlhaus-full.json`**: Real-time malware URL blocker.
 
-### 2. 🎭 Smart Redirect Resources (Anti-Adblock Defuser)
+### 2. 🎬 YouTube In-Stream JSON Ad Stripper & Fast-Skipper
+YouTube serves ads inside its player stream via server-side responses. Ad Blocker Pro Ultimate uses a dual-layer approach:
+* **Native JSON Stream Sanitizer (`inject.js`)**: Intercepts `window.ytInitialPlayerResponse` and `/youtubei/v1/player` API responses in the `MAIN` execution world before the YouTube Player Web Component initializes, stripping `adPlacements` and `playerAds` payloads. The player starts the actual video immediately with zero ad slots.
+* **Seamless In-Player Fast-Forward Fallback (`youtube.js`)**: Accelerates ad playback stream to `16x`, mutes audio during ads, and programmatically clicks Skip buttons.
+
+### 3. 🎭 Smart Redirect Resources (Anti-Adblock Defuser)
 Instead of failing network requests with errors, matching tracker and ad script requests are redirected to neutral stub assets in `web_accessible_resources/` (e.g. `googlesyndication_adsbygoogle.js`, `google-ima.js`, `amazon_ads.js`, `noop.js`, `1x1.gif`). Sites believe the ad script loaded normally, eliminating *"Please disable your AdBlocker"* warnings.
 
-### 3. 🧠 Facebook Sponsored-Post & Reels Annihilator
+### 4. 🧠 Facebook Sponsored-Post & Reels Annihilator
 Facebook delivers ads directly from its own origin (`facebook.com`) and continuously obfuscates DOM text with zero-width characters (`U+034F`), scrambled DOM hierarchies, and invisible clipped elements (`overflow: hidden`).
 * **Visual Range Reconstruction (`fb-detect.js`)**: Measures exact screen coordinates via `Range.getBoundingClientRect()` rather than reading polluted DOM text.
 * **Bilingual Support (LTR & RTL)**: Fully handles right-to-left languages (Arabic: "مُموَّل", "إعلان", "برعاية") and left-to-right (English: "Sponsored", "Ad").
 * **Reels Shelf Suppression**: Cleanly removes sponsored cards from Reels and feeds without page stutter.
 
-### 4. 🛑 In-Player Popunder & Click-Trap Neutralizer
+### 5. 🛑 In-Player Popunder & Click-Trap Neutralizer
 Movie and anime streaming platforms (such as WeCima, FaselHD, Akwam, ArabSeed) deploy transparent overlays (`div[style*="z-index"]`, `<a target="_blank">`) directly over video players to spawn popunder advertising tabs upon clicking "Play".
 * **Capture-Phase Click Interruption**: Catches and dissolves transparent clickjacking links before page event listeners can fire.
 * **In-Iframe `window.open` Disarmer**: Drops rogue popunder requests initiated within embedded video players (`iframe`).
 * **Smart Popclose Neutralizer (`popclose.js`)**: Automatically checks and terminates rogue ad landing tabs from within the newly opened window.
 
-### 5. 🔓 Anti-DevTools Protection Bypass
+### 6. 🔓 Anti-DevTools Protection Bypass
 Neutralizes key interception on `F12`, `Ctrl+Shift+I`, and `Ctrl+U`, allowing full inspection without forced page redirects.
 
 ---
@@ -60,7 +66,8 @@ Neutralizes key interception on `F12`, `Ctrl+Shift+I`, and `Ctrl+U`, allowing fu
 ├── background.js              # Background Service Worker & rule managers
 ├── content.js                 # Global cosmetic styling & click-trap disarmer
 ├── popclose.js                # Popunder auto-terminator
-├── inject.js                  # MAIN-world anti-adblock evasion & window.open filter
+├── inject.js                  # MAIN-world YouTube JSON stripper & anti-adblock evasion
+├── youtube.js                 # YouTube player ad acceleration & UI suppression
 ├── fb-detect.js               # Facebook visual coordinate detection engine
 ├── facebook.js                # Facebook feed observer and DOM scraper
 ├── popup.html / popup.js      # User interface & settings controller

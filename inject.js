@@ -42,7 +42,65 @@
     }, true);
   } catch (_) {}
 
-  // 3. Bulletproof Popunder Disarmer for Video Players & Streaming Sites
+  // 3. YouTube In-Stream Ad JSON Stripper (Native API Interception)
+  try {
+    var isYouTube = /(?:^|\.)youtube\.com$/i.test(window.location.hostname);
+    if (isYouTube) {
+      var sanitizePlayerObj = function (obj) {
+        if (!obj || typeof obj !== 'object') return obj;
+        try {
+          if (obj.adPlacements) delete obj.adPlacements;
+          if (obj.playerAds) delete obj.playerAds;
+          if (obj.adSlots) delete obj.adSlots;
+          if (obj.auxiliaryUi && obj.auxiliaryUi.messageRenderers && obj.auxiliaryUi.messageRenderers.upsellDialogRenderer) {
+            delete obj.auxiliaryUi;
+          }
+        } catch (_) {}
+        return obj;
+      };
+
+      // Sanitize window.ytInitialPlayerResponse
+      var _ytInitialPlayerResponse = window.ytInitialPlayerResponse;
+      Object.defineProperty(window, 'ytInitialPlayerResponse', {
+        get: function () { return _ytInitialPlayerResponse; },
+        set: function (val) {
+          _ytInitialPlayerResponse = sanitizePlayerObj(val);
+        },
+        configurable: true
+      });
+
+      // Intercept window.fetch for /youtubei/v1/player
+      var origFetch = window.fetch;
+      window.fetch = function (input, init) {
+        var url = (typeof input === 'string' ? input : (input && input.url ? input.url : '')).toLowerCase();
+        if (url.indexOf('/youtubei/v1/player') !== -1) {
+          return origFetch.apply(this, arguments).then(function (response) {
+            var origJson = response.json;
+            response.json = function () {
+              return origJson.apply(this, arguments).then(function (data) {
+                return sanitizePlayerObj(data);
+              });
+            };
+            var origText = response.text;
+            response.text = function () {
+              return origText.apply(this, arguments).then(function (text) {
+                try {
+                  var parsed = JSON.parse(text);
+                  return JSON.stringify(sanitizePlayerObj(parsed));
+                } catch (_) {
+                  return text;
+                }
+              });
+            };
+            return response;
+          });
+        }
+        return origFetch.apply(this, arguments);
+      };
+    }
+  } catch (_) {}
+
+  // 4. Bulletproof Popunder Disarmer for Video Players & Streaming Sites
   try {
     var originalWindowOpen = window.open;
     var AD_URL_REGEX = /popads|popcash|propellerads|adsterra|monetag|adcash|exoclick|trafficjunky|clickadu|hilltopads|bet365|1xbet|melbet|directrev|cpmgate|delivery|smartlink|safelink|track|click|bonus|offer|game|doublepimp|onclick|syndication|revenuehits/i;
