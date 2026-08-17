@@ -1,8 +1,8 @@
 /* ============================================================================
- *  youtube.js — YouTube In-Player Ad Acceleration & UI Suppression
+ *  youtube.js — YouTube In-Player Ad Acceleration & Anti-Adblock Bypass
  *
- *  Works in tandem with inject.js (Native JSON Stripper) to ensure zero ads,
- *  zero black screens, and seamless continuous playback.
+ *  Works in tandem with inject.js (Native JSON Stripper & Experiment Flags Override)
+ *  to ensure zero ads, zero enforcement dialogs, and uninterrupted playback.
  * ========================================================================== */
 
 (function () {
@@ -27,7 +27,10 @@
     "#player-ads",
     ".ytp-ad-overlay-container",
     ".ytd-merch-shelf-renderer",
-    "ytd-engagement-panel-section-list-renderer[target-id='engagement-panel-ads']"
+    "ytd-engagement-panel-section-list-renderer[target-id='engagement-panel-ads']",
+    "ytd-enforcement-message-view-model",
+    "tp-yt-paper-dialog:has(ytd-enforcement-message-view-model)",
+    "tp-yt-iron-overlay-backdrop"
   ];
 
   function injectCss() {
@@ -63,8 +66,25 @@
     ".ytp-featured-product-close-button"
   ].join(",");
 
+  // Dissolve "Ad blockers are not allowed on YouTube" dialog and resume playback
+  function dismissEnforcementDialog() {
+    var dialogs = document.querySelectorAll('ytd-enforcement-message-view-model, tp-yt-paper-dialog:has(ytd-enforcement-message-view-model), tp-yt-iron-overlay-backdrop, ytd-popup-container:has(ytd-enforcement-message-view-model)');
+    if (dialogs.length) {
+      dialogs.forEach(function (d) {
+        try { d.remove(); } catch (_) {}
+      });
+      var video = document.querySelector('video.html5-main-video, video.video-stream');
+      if (video && video.paused) {
+        try { video.play(); } catch (_) {}
+      }
+    }
+  }
+
   function handleAds() {
-    // 1. Dismiss overlay banners
+    // 1. Dismiss Anti-Adblock modal if present
+    dismissEnforcementDialog();
+
+    // 2. Dismiss overlay banners
     var dismiss = document.querySelector(DISMISS_BUTTONS);
     if (dismiss) {
       try { dismiss.click(); } catch (_) {}
@@ -75,13 +95,13 @@
 
     var isAdShowing = player.classList.contains("ad-showing") || player.classList.contains("ad-interrupting");
 
-    // 2. Click Skip button whenever painted
+    // 3. Click Skip button whenever painted
     var skip = document.querySelector(SKIP_BUTTONS);
     if (skip && skip.offsetParent !== null) {
       try { skip.click(); } catch (_) {}
     }
 
-    // 3. Fast-forward fallback if player gets stuck in an ad stream
+    // 4. Fast-forward fallback if player gets stuck in an ad stream
     if (isAdShowing) {
       var video = player.querySelector("video.html5-main-video, video.video-stream");
       if (video && isFinite(video.duration) && video.duration > 0) {
@@ -103,10 +123,13 @@
     setInterval(function () {
       if (document.visibilityState === "hidden") return;
       handleAds();
-    }, 150);
+    }, 100);
 
-    var obs = new MutationObserver(function () { injectCss(); });
-    obs.observe(document.documentElement, { childList: true, subtree: false });
+    var obs = new MutationObserver(function () {
+      injectCss();
+      dismissEnforcementDialog();
+    });
+    obs.observe(document.documentElement, { childList: true, subtree: true });
 
     window.addEventListener("yt-navigate-finish", function () {
       injectCss();

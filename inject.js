@@ -42,18 +42,60 @@
     }, true);
   } catch (_) {}
 
-  // 3. YouTube In-Stream Ad JSON Stripper (Native API Interception)
+  // 3. YouTube In-Stream Ad & Enforcement Popup Annihilator
   try {
-    var isYouTube = /(?:^|\.)youtube\.com$/i.test(window.location.hostname);
+    var isYouTube = /(?:^|\.)youtube(?:-nocookie)?\.com$/i.test(window.location.hostname);
     if (isYouTube) {
+      // A. Override YouTube Experiment Flags used to detect ad blockers
+      var sanitizeYtFlags = function (data) {
+        if (!data || typeof data !== 'object') return data;
+        try {
+          var flags = data.EXPERIMENT_FLAGS || (data.data_ && data.data_.EXPERIMENT_FLAGS);
+          if (flags && typeof flags === 'object') {
+            flags.web_enable_ab_rsp_cl = false;
+            flags.ab_pl_man = false;
+            flags.web_enable_ab_reg_app = false;
+            flags.enable_ad_block_banner = false;
+            flags.html5_enable_ssap_ad_playback = false;
+            flags.web_player_response_enrichment = false;
+          }
+        } catch (_) {}
+        return data;
+      };
+
+      if (window.ytcfg) {
+        if (window.ytcfg.data_) sanitizeYtFlags(window.ytcfg.data_);
+        if (typeof window.ytcfg.set === 'function') {
+          var origSet = window.ytcfg.set;
+          window.ytcfg.set = function (d) { return origSet.call(window.ytcfg, sanitizeYtFlags(d)); };
+        }
+      } else {
+        var _ytcfg;
+        Object.defineProperty(window, 'ytcfg', {
+          get: function () { return _ytcfg; },
+          set: function (val) {
+            _ytcfg = val;
+            if (val && typeof val.set === 'function') {
+              var s = val.set;
+              val.set = function (d) { return s.call(val, sanitizeYtFlags(d)); };
+            }
+          },
+          configurable: true
+        });
+      }
+
+      // B. Sanitize Player Objects (Strip ad placements, player ads, and enforcement dialogs)
       var sanitizePlayerObj = function (obj) {
         if (!obj || typeof obj !== 'object') return obj;
         try {
           if (obj.adPlacements) delete obj.adPlacements;
           if (obj.playerAds) delete obj.playerAds;
           if (obj.adSlots) delete obj.adSlots;
-          if (obj.auxiliaryUi && obj.auxiliaryUi.messageRenderers && obj.auxiliaryUi.messageRenderers.upsellDialogRenderer) {
-            delete obj.auxiliaryUi;
+          if (obj.auxiliaryUi) delete obj.auxiliaryUi;
+          if (Array.isArray(obj.messages)) {
+            obj.messages = obj.messages.filter(function (m) {
+              return !m.mealbarPromoRenderer && !m.enforcementMessageViewModel;
+            });
           }
         } catch (_) {}
         return obj;
