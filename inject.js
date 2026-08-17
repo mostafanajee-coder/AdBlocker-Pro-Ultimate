@@ -42,7 +42,7 @@
     }, true);
   } catch (_) {}
 
-  // 3. YouTube In-Stream Ad & Enforcement Popup Annihilator
+  // 3. YouTube In-Stream Ad & Native Player API Engine (MAIN World)
   try {
     var isYouTube = /(?:^|\.)youtube(?:-nocookie)?\.com$/i.test(window.location.hostname);
     if (isYouTube) {
@@ -139,6 +139,45 @@
         }
         return origFetch.apply(this, arguments);
       };
+
+      // C. Direct YouTube Player API Hook (Calls native movie_player.skipAd())
+      function pulseYouTubePlayer() {
+        try {
+          var player = document.getElementById('movie_player') || document.querySelector('.html5-video-player');
+          if (player) {
+            var isAd = (player.classList && (player.classList.contains('ad-showing') || player.classList.contains('ad-interrupting'))) ||
+                       (typeof player.getAdState === 'function' && player.getAdState() > 0);
+
+            if (isAd) {
+              // 1. Native API skip call
+              if (typeof player.skipAd === 'function') {
+                player.skipAd();
+              }
+              // 2. Native API seek & speed-up
+              if (typeof player.getDuration === 'function' && typeof player.seekTo === 'function') {
+                var dur = player.getDuration();
+                if (isFinite(dur) && dur > 0) {
+                  player.seekTo(dur - 0.001, true);
+                }
+              }
+              if (typeof player.setPlaybackRate === 'function') {
+                player.setPlaybackRate(16);
+              }
+              // 3. Fallback video element manipulation
+              var video = player.querySelector('video');
+              if (video) {
+                video.muted = true;
+                video.playbackRate = 16;
+                if (isFinite(video.duration) && video.duration > 0) {
+                  video.currentTime = video.duration - 0.001;
+                }
+              }
+            }
+          }
+        } catch (_) {}
+      }
+
+      setInterval(pulseYouTubePlayer, 50);
     }
   } catch (_) {}
 

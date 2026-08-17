@@ -2,7 +2,7 @@
  *  youtube.js — YouTube In-Player Ad Annihilator & Fast-Skipper
  *
  *  Automatically dissolves all YouTube ads, skips interactive card promotions
- *  (e.g. ExitLag), hides Premium promo toasts, and fast-forwards ad streams.
+ *  (e.g. ExitLag, Wiobala), hides Premium promo toasts, and fast-forwards ad streams.
  * ========================================================================== */
 
 (function () {
@@ -66,7 +66,10 @@
     ".ytp-ad-survey-answer-button",
     ".html5-video-player button[aria-label*='Skip ad' i]",
     ".html5-video-player button[aria-label*='Skip' i]",
-    ".html5-video-player button[aria-label*='تخطي']"
+    ".html5-video-player button[aria-label*='تخطي']",
+    ".html5-video-player button:has(span:contains('تخطي'))",
+    ".ytp-ad-skip-button-slot button",
+    ".ytp-ad-skip-button-slot"
   ].join(",");
 
   var DISMISS_BUTTONS = [
@@ -74,6 +77,22 @@
     ".ytp-ad-overlay-close-container",
     ".ytp-featured-product-close-button"
   ].join(",");
+
+  function triggerClick(el) {
+    if (!el) return;
+    try {
+      el.click();
+      var events = ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'];
+      for (var i = 0; i < events.length; i++) {
+        el.dispatchEvent(new MouseEvent(events[i], {
+          bubbles: true,
+          cancelable: true,
+          view: window,
+          buttons: 1
+        }));
+      }
+    } catch (_) {}
+  }
 
   // Dissolve "Ad blockers are not allowed on YouTube" dialog and resume playback
   function dismissEnforcementDialog() {
@@ -95,22 +114,19 @@
     // 1. Dismiss overlay banners
     var dismiss = document.querySelector(DISMISS_BUTTONS);
     if (dismiss) {
-      try { dismiss.click(); } catch (_) {}
+      triggerClick(dismiss);
     }
 
-    // 2. Click Modern Skip button whenever present
+    // 2. Click Modern & Arabic Skip button whenever present
     var skip = document.querySelector(SKIP_BUTTONS);
     if (skip) {
-      try {
-        skip.click();
-        skip.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
-      } catch (_) {}
+      triggerClick(skip);
     }
 
     // 3. Detect active ad playback and fast-forward stream to completion
     var player = document.querySelector(".html5-video-player");
     var isAd = (player && (player.classList.contains("ad-showing") || player.classList.contains("ad-interrupting"))) ||
-               document.querySelector(".ytp-ad-text, .ytp-ad-badge, .ytp-ad-player-overlay, .ytp-ad-preview-container, .ytp-ad-module");
+               document.querySelector(".ytp-ad-text, .ytp-ad-badge, .ytp-ad-player-overlay, .ytp-ad-preview-container, .ytp-ad-module, .ytp-ad-player-overlay-layout");
 
     if (isAd) {
       var video = player ? player.querySelector("video.html5-main-video, video.video-stream") : document.querySelector("video");
@@ -138,7 +154,7 @@
     setInterval(function () {
       if (document.visibilityState === "hidden") return;
       killAd();
-    }, 50);
+    }, 40);
 
     var obs = new MutationObserver(function () {
       injectCss();
