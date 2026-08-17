@@ -1,8 +1,5 @@
 /* ============================================================================
- *  youtube.js — YouTube In-Player Ad Acceleration & Anti-Adblock Bypass
- *
- *  Works in tandem with inject.js (Native JSON Stripper & Experiment Flags Override)
- *  to ensure zero ads, zero enforcement dialogs, and uninterrupted playback.
+ *  youtube.js — Ultra-Fast YouTube In-Player Ad Annihilator & Bypass
  * ========================================================================== */
 
 (function () {
@@ -80,35 +77,30 @@
     }
   }
 
-  function handleAds() {
-    // 1. Dismiss Anti-Adblock modal if present
+  function killAd() {
     dismissEnforcementDialog();
 
-    // 2. Dismiss overlay banners
     var dismiss = document.querySelector(DISMISS_BUTTONS);
     if (dismiss) {
       try { dismiss.click(); } catch (_) {}
     }
 
     var player = document.querySelector(".html5-video-player");
-    if (!player) return;
+    var isAd = (player && (player.classList.contains("ad-showing") || player.classList.contains("ad-interrupting"))) ||
+               document.querySelector(".ytp-ad-text, .ytp-ad-badge, .ytp-ad-player-overlay, .ytp-ad-preview-container");
 
-    var isAdShowing = player.classList.contains("ad-showing") || player.classList.contains("ad-interrupting");
-
-    // 3. Click Skip button whenever painted
     var skip = document.querySelector(SKIP_BUTTONS);
     if (skip && skip.offsetParent !== null) {
       try { skip.click(); } catch (_) {}
     }
 
-    // 4. Fast-forward fallback if player gets stuck in an ad stream
-    if (isAdShowing) {
-      var video = player.querySelector("video.html5-main-video, video.video-stream");
-      if (video && isFinite(video.duration) && video.duration > 0) {
+    if (isAd) {
+      var video = player ? player.querySelector("video.html5-main-video, video.video-stream") : document.querySelector("video");
+      if (video) {
         try {
           video.muted = true;
           video.playbackRate = 16;
-          if (video.currentTime < video.duration - 0.1) {
+          if (isFinite(video.duration) && video.duration > 0) {
             video.currentTime = video.duration;
           }
         } catch (_) {}
@@ -116,24 +108,29 @@
     }
   }
 
+  // Hook capture phase on video playback events for instant zero-latency ad destruction
+  document.addEventListener('timeupdate', killAd, true);
+  document.addEventListener('playing', killAd, true);
+  document.addEventListener('play', killAd, true);
+
   function start() {
     injectCss();
-    handleAds();
+    killAd();
 
     setInterval(function () {
       if (document.visibilityState === "hidden") return;
-      handleAds();
-    }, 100);
+      killAd();
+    }, 150);
 
     var obs = new MutationObserver(function () {
       injectCss();
-      dismissEnforcementDialog();
+      killAd();
     });
     obs.observe(document.documentElement, { childList: true, subtree: true });
 
     window.addEventListener("yt-navigate-finish", function () {
       injectCss();
-      handleAds();
+      killAd();
     });
   }
 

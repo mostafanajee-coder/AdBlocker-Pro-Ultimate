@@ -15,6 +15,10 @@
     return false;
   }
 
+  function isStreamingSite(host) {
+    return /faselhd|faselhdx|wecima|mycima|akwam|arabseed|egybest|egydead|cima|shahid|laroza/i.test(host);
+  }
+
   function shouldSkip(target) {
     var tag = target && target.tagName;
     return tag === "INPUT" || tag === "TEXTAREA" || (target && target.isContentEditable);
@@ -59,29 +63,33 @@
     }
   }
 
-  // Neutralize invisible transparent click-traps layered over video players
+  // Neutralize invisible transparent click-traps layered over video players ONLY on streaming sites
   function defuseClickTraps() {
     try {
-      var links = document.querySelectorAll('a[target="_blank"], div[style*="position: absolute"], div[style*="position: fixed"]');
+      var host = window.location.hostname.toLowerCase();
+      if (!isStreamingSite(host)) return; // Never tamper with YouTube, Google, etc.
+
+      var links = document.querySelectorAll('a[target="_blank"]');
       for (var i = 0; i < links.length; i++) {
         var el = links[i];
-        if (el.tagName === 'A') {
-          var rect = el.getBoundingClientRect();
-          if (rect.width > 200 && rect.height > 100) {
-            var href = (el.href || "").toLowerCase();
-            if (/bet|aff|track|click|pop|redir|smartlink|offer|bonus|ad|cpm/i.test(href) || el.textContent.trim().length === 0) {
-              el.style.pointerEvents = "none";
-              el.style.display = "none";
-            }
+        var rect = el.getBoundingClientRect();
+        if (rect.width > 200 && rect.height > 100) {
+          var href = (el.href || "").toLowerCase();
+          if (/bet|aff|track|click|pop|redir|smartlink|offer|bonus|ad|cpm/i.test(href)) {
+            el.style.pointerEvents = "none";
+            el.style.display = "none";
           }
         }
       }
     } catch (_) {}
   }
 
-  // Capture-phase click interceptor: Prevents any rogue click-jacking link over video players
+  // Capture-phase click interceptor: Prevents rogue click-jacking on streaming sites
   document.addEventListener('click', function (e) {
     try {
+      var host = window.location.hostname.toLowerCase();
+      if (!isStreamingSite(host)) return;
+
       var target = e.target;
       var anchor = target.closest('a');
       var playerArea = target.closest('#player, .player, .watch-holder, .video-player, .player-container, .player-holder, .embed-responsive, .player-iframe, iframe');
@@ -142,10 +150,12 @@
     applyCosmeticFilters(settings);
     applyMouseUnlock(settings);
 
-    defuseClickTraps();
-    if (document.readyState === "loading") {
-      document.addEventListener("DOMContentLoaded", defuseClickTraps);
+    if (isStreamingSite(hostname)) {
+      defuseClickTraps();
+      if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", defuseClickTraps);
+      }
+      setInterval(defuseClickTraps, 1500);
     }
-    setInterval(defuseClickTraps, 1500);
   });
 })();
