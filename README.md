@@ -2,10 +2,10 @@
 
 [![Manifest V3](https://img.shields.io/badge/Chrome-Manifest%20V3-blue.svg)](https://developer.chrome.com/docs/extensions/mv3/intro/)
 [![Tests](https://img.shields.io/badge/Tests-58%2F58%20Passing-brightgreen.svg)](tests/fb-detect.test.js)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE.txt)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Speed](https://img.shields.io/badge/Performance-Ultra--Fast-orange.svg)](#)
 
-A high-performance, lightweight Manifest V3 ad blocker engineered for modern Chromium browsers. Designed to replace legacy MV2 blockers with surgical precision, featuring native declarative network filtering, intelligent Facebook sponsored-post detection, instant YouTube ad skipping, in-player popunder disarming, and undetectable anti-adblock evasion.
+A high-performance, lightweight Manifest V3 ad blocker engineered for modern Chromium browsers. Designed to replace legacy MV2 blockers with surgical precision, featuring native declarative network filtering, intelligent Facebook sponsored-post detection, in-player popunder disarming, and undetectable anti-adblock evasion.
 
 ---
 
@@ -17,7 +17,6 @@ A high-performance, lightweight Manifest V3 ad blocker engineered for modern Chr
 | **Network Filtering** | Heavy webRequest memory overhead | **Pre-compiled DeclarativeNetRequest (Core 6 Lists)** |
 | **Anti-Adblock Defusal** | Easily detected via missing global objects | **37 Web Accessible Resource Stubs (`noop.js`, `1x1.gif`)** |
 | **Facebook & Reels** | Broken by class obfuscation | **Sub-pixel Visual Coordinate Reconstruction** |
-| **YouTube Ads** | Prone to black screens & audio muting | **Instantaneous Acceleration & Fast-Skip Engine** |
 | **Video Player Popunders**| Intrusive new tabs on click | **Capture-Phase Click Interceptor & Auto-Closer** |
 | **Anti-DevTools Hijacking**| Redirects on F12 / Inspect | **Hardware Key & Debugger Loop Neutralizer** |
 
@@ -43,17 +42,13 @@ Facebook delivers ads directly from its own origin (`facebook.com`) and continuo
 * **Bilingual Support (LTR & RTL)**: Fully handles right-to-left languages (Arabic: "مُموَّل", "إعلان", "برعاية") and left-to-right (English: "Sponsored", "Ad").
 * **Reels Shelf Suppression**: Cleanly removes sponsored cards from Reels and feeds without page stutter.
 
-### 4. 🎬 YouTube Instantaneous Ad-Skipper
-* **Non-Destructive Fast-Forward**: Accelerates ad playback stream to `16x`, mutes audio during ads, and programmatically clicks the Skip button the millisecond it becomes available.
-* **Zero Black Screens**: Eliminates obstructive dark curtain overlays and prevents normal user videos from being skipped prematurely.
-
-### 5. 🛑 In-Player Popunder & Click-Trap Neutralizer
+### 4. 🛑 In-Player Popunder & Click-Trap Neutralizer
 Movie and anime streaming platforms (such as WeCima, FaselHD, Akwam, ArabSeed) deploy transparent overlays (`div[style*="z-index"]`, `<a target="_blank">`) directly over video players to spawn popunder advertising tabs upon clicking "Play".
 * **Capture-Phase Click Interruption**: Catches and dissolves transparent clickjacking links before page event listeners can fire.
 * **In-Iframe `window.open` Disarmer**: Drops rogue popunder requests initiated within embedded video players (`iframe`).
 * **Smart Popclose Neutralizer (`popclose.js`)**: Automatically checks and terminates rogue ad landing tabs from within the newly opened window.
 
-### 6. 🔓 Anti-DevTools Protection Bypass
+### 5. 🔓 Anti-DevTools Protection Bypass
 Neutralizes key interception on `F12`, `Ctrl+Shift+I`, and `Ctrl+U`, allowing full inspection without forced page redirects.
 
 ---
@@ -68,7 +63,6 @@ Neutralizes key interception on `F12`, `Ctrl+Shift+I`, and `Ctrl+U`, allowing fu
 ├── inject.js                  # MAIN-world anti-adblock evasion & window.open filter
 ├── fb-detect.js               # Facebook visual coordinate detection engine
 ├── facebook.js                # Facebook feed observer and DOM scraper
-├── youtube.js                 # YouTube player ad acceleration & skipper
 ├── popup.html / popup.js      # User interface & settings controller
 ├── rulesets/
 │   └── main/                  # Core 6 DNR pre-compiled JSON rulesets
@@ -118,4 +112,4 @@ npm test
 
 ## 📄 License
 
-This project is licensed under the MIT License - see the [LICENSE.txt](LICENSE.txt) file for details.
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.

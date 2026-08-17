@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Ad Blocker Pro",
   "version": "3.4.0",
-  "description": "Ultra-fast Manifest V3 ad blocker: Core community filter lists, Facebook sponsored-post detection, YouTube ad skipping, and safe anti-adblock evasion.",
+  "description": "Ultra-fast Manifest V3 ad blocker: Core community filter lists, Facebook sponsored-post detection, Popunder neutralizer, and safe anti-adblock evasion.",
   "permissions": [
     "declarativeNetRequest",
     "declarativeNetRequestWithHostAccess",
