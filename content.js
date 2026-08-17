@@ -31,13 +31,13 @@
       ".ad-banner, .ad-container, .ad-wrapper, .ad_box, .ad_unit,",
       "ins.adsbygoogle, .sponsored-post, .sponsored-content, [class*=\"sponsored\"],",
       '[id*="google_ads"], [id*="taboola"], [id*="outbrain"],',
-      // Video player ad overlays (JWPlayer, VideoJS, FluidPlayer, Custom Iframe Overlays)
+      // Video player ad overlays on streaming sites
       ".jw-ad-container, .jw-ad-break, .jw-ad-overlay, .jw-flag-ads,",
       ".vjs-ad-overlay, .vjs-ima3-ad-container, .vjs-ad-loading,",
       ".fluid_video_wrapper .ad_banner, .player-ads, .video-ad-overlay,",
       'div[id^="ad_overlay"], div[class*="ad_overlay"], div[class*="video_ad"],',
       'div[class*="click-trap"], div[class*="click_trap"], a[class*="click_trap"],',
-      'div[id*="ad-holder"], div[class*="ad-holder"], div.player-overlay, div.adv-overlay, div.adv-holder'
+      'div[id*="ad-holder"], div[class*="ad-holder"], div.adv-overlay, div.adv-holder'
     ].join("\n");
 
     var css = builtin + " { display: none !important; }";
@@ -113,6 +113,9 @@
 
   function applyMouseUnlock(settings) {
     if (!settings.mouseUnlock) return;
+    var host = window.location.hostname.toLowerCase();
+    if (/(?:^|\.)youtube\.com$/i.test(host)) return; // Never interfere with YouTube player controls or context menu
+
     var events = ["contextmenu", "copy", "cut", "selectstart", "dragstart"];
     for (var i = 0; i < events.length; i++) {
       document.addEventListener(events[i], function (e) {

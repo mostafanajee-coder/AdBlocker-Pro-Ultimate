@@ -1,8 +1,10 @@
 /* ============================================================================
- *  youtube.js — YouTube In-Player Ad Annihilator & Fast-Skipper
+ *  youtube.js — YouTube Clean Ad Annihilator & Player Harmony Engine
  *
- *  Automatically dissolves all YouTube ads, skips interactive card promotions
- *  (e.g. ExitLag, Wiobala), hides Premium promo toasts, and fast-forwards ad streams.
+ *  Safe, Surgical, Non-Intrusive:
+ *  - 100% normal mouse interactions (Left-click, Double-click, Right-click).
+ *  - Clicks ONLY explicit Ad Skip buttons (Never touches Next Video or Chapter Skip).
+ *  - Guaranteed NEVER to skip user video or jump to the end!
  * ========================================================================== */
 
 (function () {
@@ -34,8 +36,7 @@
     "ytd-mealbar-promo-renderer",
     ".ytp-ad-avatar-lockup-card",
     ".ytp-ad-action-interstitial",
-    ".ytp-ad-image-overlay",
-    ".ytp-ad-overlay-slot"
+    ".ytp-ad-image-overlay"
   ];
 
   function injectCss() {
@@ -50,50 +51,18 @@
     (document.head || document.documentElement).appendChild(style);
   }
 
-  var SKIP_BUTTONS = [
-    ".ytp-skip-ad-button",
-    ".ytp-ad-skip-button",
-    ".ytp-ad-skip-button-modern",
-    "button.ytp-ad-skip-button-container",
+  // SURGICAL SELECTORS: Only match actual AD skip buttons.
+  // NEVER use broad wildcards that might match "Next video" or "Skip chapter"!
+  var AD_SKIP_BUTTONS = [
     "button.ytp-skip-ad-button",
-    ".ytp-skip-ad-button__text",
-    ".ytp-ad-skip-button-text",
-    "[class*='skip-ad-button']",
-    "[class*='ytp-skip-ad-button']",
-    "[id*='skip-button']",
-    "[id^='skip-button:']",
-    ".ytp-ad-preview-container",
-    ".ytp-ad-survey-answer-button",
-    ".html5-video-player button[aria-label*='Skip ad' i]",
-    ".html5-video-player button[aria-label*='Skip' i]",
-    ".html5-video-player button[aria-label*='تخطي']",
+    "button.ytp-ad-skip-button",
+    "button.ytp-ad-skip-button-modern",
     ".ytp-ad-skip-button-slot button",
-    ".ytp-ad-skip-button-slot"
+    ".ytp-ad-skip-button-container button",
+    ".ytp-ad-skip-button-modern",
+    ".ytp-skip-ad-button"
   ].join(",");
 
-  var DISMISS_BUTTONS = [
-    ".ytp-ad-overlay-close-button",
-    ".ytp-ad-overlay-close-container",
-    ".ytp-featured-product-close-button"
-  ].join(",");
-
-  function triggerClick(el) {
-    if (!el) return;
-    try {
-      el.click();
-      var events = ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'];
-      for (var i = 0; i < events.length; i++) {
-        el.dispatchEvent(new MouseEvent(events[i], {
-          bubbles: true,
-          cancelable: true,
-          view: window,
-          buttons: 1
-        }));
-      }
-    } catch (_) {}
-  }
-
-  // Dissolve "Ad blockers are not allowed on YouTube" dialog and resume playback
   function dismissEnforcementDialog() {
     var dialogs = document.querySelectorAll('ytd-enforcement-message-view-model, tp-yt-paper-dialog:has(ytd-enforcement-message-view-model), tp-yt-iron-overlay-backdrop, ytd-popup-container:has(ytd-enforcement-message-view-model)');
     if (dialogs.length) {
@@ -110,41 +79,43 @@
   function killAd() {
     dismissEnforcementDialog();
 
-    // 1. Dismiss overlay banners
-    var dismiss = document.querySelector(DISMISS_BUTTONS);
-    if (dismiss) {
-      triggerClick(dismiss);
-    }
-
-    // 2. Click Modern & Arabic Skip button whenever present
-    var skip = document.querySelector(SKIP_BUTTONS);
-    if (skip) {
-      triggerClick(skip);
-    }
-
-    // 3. Detect active ad playback and fast-forward stream to completion
     var player = document.querySelector(".html5-video-player");
-    var isAd = (player && (player.classList.contains("ad-showing") || player.classList.contains("ad-interrupting"))) ||
-               document.querySelector(".ytp-ad-text, .ytp-ad-badge, .ytp-ad-player-overlay, .ytp-ad-preview-container, .ytp-ad-module, .ytp-ad-player-overlay-layout");
+    if (!player) return;
 
-    if (isAd) {
-      var video = player ? player.querySelector("video.html5-main-video, video.video-stream") : document.querySelector("video");
-      if (video) {
-        try {
-          video.muted = true;
-          video.playbackRate = 16;
-          if (isFinite(video.duration) && video.duration > 0) {
-            video.currentTime = video.duration - 0.001;
-          }
-        } catch (_) {}
+    var isAdShowing = player.classList.contains("ad-showing") || player.classList.contains("ad-interrupting");
+    var isOverlayCard = Boolean(document.querySelector(".ytp-ad-player-overlay, .ytp-ad-player-overlay-layout"));
+
+    if (isAdShowing || isOverlayCard) {
+      // 1. Click explicit ad skip button only if visible
+      var skipBtns = document.querySelectorAll(AD_SKIP_BUTTONS);
+      for (var i = 0; i < skipBtns.length; i++) {
+        var btn = skipBtns[i];
+        if (btn && (btn.offsetParent !== null || btn.getClientRects().length > 0)) {
+          try {
+            btn.click();
+          } catch (_) {}
+        }
+      }
+
+      // 2. Accelerate ad stream to 16x (ONLY when player is actively in ad-showing mode)
+      if (isAdShowing) {
+        var video = player.querySelector("video.html5-main-video, video.video-stream");
+        if (video) {
+          try {
+            video.muted = true;
+            video.playbackRate = 16;
+          } catch (_) {}
+        }
+      }
+    } else {
+      // 3. Ensure normal playback rate on normal video content
+      var normalVideo = player.querySelector("video.html5-main-video, video.video-stream");
+      if (normalVideo && normalVideo.playbackRate > 2) {
+        normalVideo.playbackRate = 1.0;
+        normalVideo.muted = false;
       }
     }
   }
-
-  // Hook playback events for zero-latency ad destruction
-  document.addEventListener('timeupdate', killAd, true);
-  document.addEventListener('playing', killAd, true);
-  document.addEventListener('play', killAd, true);
 
   function start() {
     injectCss();
@@ -153,7 +124,7 @@
     setInterval(function () {
       if (document.visibilityState === "hidden") return;
       killAd();
-    }, 25);
+    }, 100);
 
     var obs = new MutationObserver(function () {
       injectCss();

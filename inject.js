@@ -42,7 +42,7 @@
     }, true);
   } catch (_) {}
 
-  // 3. YouTube Zero-Ad In-Stream Engine (JSON.parse + Player API + ytcfg override)
+  // 3. YouTube In-Stream JSON Sanitizer & Safe Player Engine (MAIN World)
   try {
     var isYouTube = /(?:^|\.)youtube(?:-nocookie)?\.com$/i.test(window.location.hostname);
     if (isYouTube) {
@@ -62,7 +62,7 @@
         return obj;
       };
 
-      // A. Hook JSON.parse to sanitize any incoming YouTube player responses
+      // A. Hook JSON.parse to strip ad configurations at incoming network parsing
       var origJSONParse = JSON.parse;
       JSON.parse = function (text, reviver) {
         var res = origJSONParse.apply(this, arguments);
@@ -149,36 +149,29 @@
         return origFetch.apply(this, arguments);
       };
 
-      // E. Media Playback & Player API Fast-Forward
+      // E. SAFE Native Player API Hook (Never tampers with video.currentTime)
       function pulseYouTubePlayer() {
         try {
           var player = document.getElementById('movie_player') || document.querySelector('.html5-video-player');
           if (player) {
             var isAd = (player.classList && (player.classList.contains('ad-showing') || player.classList.contains('ad-interrupting'))) ||
-                       (typeof player.getAdState === 'function' && player.getAdState() > 0) ||
-                       document.querySelector('.ytp-ad-text, .ytp-ad-badge, .ytp-ad-player-overlay, .ytp-ad-preview-container, .ytp-ad-player-overlay-layout');
+                       (typeof player.getAdState === 'function' && player.getAdState() > 0);
 
             if (isAd) {
               if (typeof player.skipAd === 'function') {
                 player.skipAd();
               }
-              if (typeof player.cancelPlayback === 'function') {
-                player.cancelPlayback();
-              }
               var video = player.querySelector('video') || document.querySelector('video');
               if (video) {
                 video.muted = true;
                 video.playbackRate = 16;
-                if (isFinite(video.duration) && video.duration > 0) {
-                  video.currentTime = video.duration - 0.001;
-                }
               }
             }
           }
         } catch (_) {}
       }
 
-      setInterval(pulseYouTubePlayer, 30);
+      setInterval(pulseYouTubePlayer, 50);
     }
   } catch (_) {}
 
