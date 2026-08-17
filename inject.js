@@ -42,11 +42,37 @@
     }, true);
   } catch (_) {}
 
-  // 3. YouTube In-Stream Ad & Native Player API Engine (MAIN World)
+  // 3. YouTube Zero-Ad In-Stream Engine (JSON.parse + Player API + ytcfg override)
   try {
     var isYouTube = /(?:^|\.)youtube(?:-nocookie)?\.com$/i.test(window.location.hostname);
     if (isYouTube) {
-      // A. Override YouTube Experiment Flags used to detect ad blockers
+      var sanitizeData = function (obj) {
+        if (!obj || typeof obj !== 'object') return obj;
+        try {
+          if (obj.adPlacements) delete obj.adPlacements;
+          if (obj.playerAds) delete obj.playerAds;
+          if (obj.adSlots) delete obj.adSlots;
+          if (obj.auxiliaryUi) delete obj.auxiliaryUi;
+          if (Array.isArray(obj.messages)) {
+            obj.messages = obj.messages.filter(function (m) {
+              return !m.mealbarPromoRenderer && !m.enforcementMessageViewModel;
+            });
+          }
+        } catch (_) {}
+        return obj;
+      };
+
+      // A. Hook JSON.parse to sanitize any incoming YouTube player responses
+      var origJSONParse = JSON.parse;
+      JSON.parse = function (text, reviver) {
+        var res = origJSONParse.apply(this, arguments);
+        if (res && typeof res === 'object') {
+          sanitizeData(res);
+        }
+        return res;
+      };
+
+      // B. Override YouTube Experiment Flags used for ad blocker detection
       var sanitizeYtFlags = function (data) {
         if (!data || typeof data !== 'object') return data;
         try {
@@ -84,34 +110,17 @@
         });
       }
 
-      // B. Sanitize Player Objects (Strip ad placements, player ads, and enforcement dialogs)
-      var sanitizePlayerObj = function (obj) {
-        if (!obj || typeof obj !== 'object') return obj;
-        try {
-          if (obj.adPlacements) delete obj.adPlacements;
-          if (obj.playerAds) delete obj.playerAds;
-          if (obj.adSlots) delete obj.adSlots;
-          if (obj.auxiliaryUi) delete obj.auxiliaryUi;
-          if (Array.isArray(obj.messages)) {
-            obj.messages = obj.messages.filter(function (m) {
-              return !m.mealbarPromoRenderer && !m.enforcementMessageViewModel;
-            });
-          }
-        } catch (_) {}
-        return obj;
-      };
-
-      // Sanitize window.ytInitialPlayerResponse
+      // C. Sanitize window.ytInitialPlayerResponse
       var _ytInitialPlayerResponse = window.ytInitialPlayerResponse;
       Object.defineProperty(window, 'ytInitialPlayerResponse', {
         get: function () { return _ytInitialPlayerResponse; },
         set: function (val) {
-          _ytInitialPlayerResponse = sanitizePlayerObj(val);
+          _ytInitialPlayerResponse = sanitizeData(val);
         },
         configurable: true
       });
 
-      // Intercept window.fetch for /youtubei/v1/player
+      // D. Intercept window.fetch for /youtubei/v1/player
       var origFetch = window.fetch;
       window.fetch = function (input, init) {
         var url = (typeof input === 'string' ? input : (input && input.url ? input.url : '')).toLowerCase();
@@ -120,7 +129,7 @@
             var origJson = response.json;
             response.json = function () {
               return origJson.apply(this, arguments).then(function (data) {
-                return sanitizePlayerObj(data);
+                return sanitizeData(data);
               });
             };
             var origText = response.text;
@@ -128,7 +137,7 @@
               return origText.apply(this, arguments).then(function (text) {
                 try {
                   var parsed = JSON.parse(text);
-                  return JSON.stringify(sanitizePlayerObj(parsed));
+                  return JSON.stringify(sanitizeData(parsed));
                 } catch (_) {
                   return text;
                 }
@@ -140,31 +149,23 @@
         return origFetch.apply(this, arguments);
       };
 
-      // C. Direct YouTube Player API Hook (Calls native movie_player.skipAd())
+      // E. Media Playback & Player API Fast-Forward
       function pulseYouTubePlayer() {
         try {
           var player = document.getElementById('movie_player') || document.querySelector('.html5-video-player');
           if (player) {
             var isAd = (player.classList && (player.classList.contains('ad-showing') || player.classList.contains('ad-interrupting'))) ||
-                       (typeof player.getAdState === 'function' && player.getAdState() > 0);
+                       (typeof player.getAdState === 'function' && player.getAdState() > 0) ||
+                       document.querySelector('.ytp-ad-text, .ytp-ad-badge, .ytp-ad-player-overlay, .ytp-ad-preview-container, .ytp-ad-player-overlay-layout');
 
             if (isAd) {
-              // 1. Native API skip call
               if (typeof player.skipAd === 'function') {
                 player.skipAd();
               }
-              // 2. Native API seek & speed-up
-              if (typeof player.getDuration === 'function' && typeof player.seekTo === 'function') {
-                var dur = player.getDuration();
-                if (isFinite(dur) && dur > 0) {
-                  player.seekTo(dur - 0.001, true);
-                }
+              if (typeof player.cancelPlayback === 'function') {
+                player.cancelPlayback();
               }
-              if (typeof player.setPlaybackRate === 'function') {
-                player.setPlaybackRate(16);
-              }
-              // 3. Fallback video element manipulation
-              var video = player.querySelector('video');
+              var video = player.querySelector('video') || document.querySelector('video');
               if (video) {
                 video.muted = true;
                 video.playbackRate = 16;
@@ -177,7 +178,7 @@
         } catch (_) {}
       }
 
-      setInterval(pulseYouTubePlayer, 50);
+      setInterval(pulseYouTubePlayer, 30);
     }
   } catch (_) {}
 

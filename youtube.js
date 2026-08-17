@@ -67,7 +67,6 @@
     ".html5-video-player button[aria-label*='Skip ad' i]",
     ".html5-video-player button[aria-label*='Skip' i]",
     ".html5-video-player button[aria-label*='تخطي']",
-    ".html5-video-player button:has(span:contains('تخطي'))",
     ".ytp-ad-skip-button-slot button",
     ".ytp-ad-skip-button-slot"
   ].join(",");
@@ -154,7 +153,7 @@
     setInterval(function () {
       if (document.visibilityState === "hidden") return;
       killAd();
-    }, 40);
+    }, 25);
 
     var obs = new MutationObserver(function () {
       injectCss();

@@ -1,8 +1,8 @@
 {
   "name": "ad-blocker-pro",
-  "version": "3.9.0",
+  "version": "4.0.0",
   "private": true,
-  "description": "Ultra-fast Manifest V3 ad blocker: Core community filter lists, Facebook sponsored-post detection, YouTube Native movie_player.skipAd() API engine, and Popunder neutralizer.",
+  "description": "Ultra-fast Manifest V3 ad blocker: Core community filter lists, Facebook sponsored-post detection, YouTube JSON stream stripper & high-speed player skipper, and Popunder neutralizer.",
   "scripts": {
     "test": "node tests/fb-detect.test.js"
   },
