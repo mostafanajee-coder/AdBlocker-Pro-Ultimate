@@ -1,22 +1,22 @@
-# 🛡️ Ad Blocker Pro Ultimate (v3.5.0)
+# 🛡️ Ad Blocker Pro Ultimate (v4.2.0)
 
 [![Manifest V3](https://img.shields.io/badge/Chrome-Manifest%20V3-blue.svg)](https://developer.chrome.com/docs/extensions/mv3/intro/)
 [![Tests](https://img.shields.io/badge/Tests-58%2F58%20Passing-brightgreen.svg)](tests/fb-detect.test.js)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Speed](https://img.shields.io/badge/Performance-Ultra--Fast-orange.svg)](#)
 
-A high-performance, lightweight Manifest V3 ad blocker engineered for modern Chromium browsers. Designed to replace legacy MV2 blockers with surgical precision, featuring native declarative network filtering, intelligent Facebook sponsored-post detection, YouTube in-stream JSON ad stripping, in-player popunder disarming, and undetectable anti-adblock evasion.
+A high-performance, lightweight Manifest V3 ad blocker engineered for modern Chromium browsers. Designed to replace legacy MV2 blockers with surgical precision, featuring native declarative network filtering, intelligent Facebook sponsored-post detection, YouTube Zero-Latency instant playback with multi-trap ad elimination, in-player popunder disarming, and undetectable anti-adblock evasion.
 
 ---
 
 ## ⚡ Key Highlights & Architecture
 
-| Feature | Legacy MV2 Blockers | Ad Blocker Pro Ultimate (v3.5.0) |
+| Feature | Legacy MV2 Blockers | Ad Blocker Pro Ultimate (v4.2.0) |
 | :--- | :--- | :--- |
 | **Manifest Compatibility** | Deprecated / Disabled in Chrome 120+ | **Native Manifest V3 Compliance** |
 | **Network Filtering** | Heavy webRequest memory overhead | **Pre-compiled DeclarativeNetRequest (Core 6 Lists)** |
 | **Anti-Adblock Defusal** | Easily detected via missing global objects | **37 Web Accessible Resource Stubs (`noop.js`, `1x1.gif`)** |
-| **YouTube Ads** | Blocked with black screens or video freezes | **Native `ytInitialPlayerResponse` In-Stream JSON Stripper** |
+| **YouTube Ads** | Blocked with black screens or video freezes | **Multi-Trap JSON Stripper + Stealth Zero-Seek Annihilator** |
 | **Facebook & Reels** | Broken by class obfuscation | **Sub-pixel Visual Coordinate Reconstruction** |
 | **Video Player Popunders**| Intrusive new tabs on click | **Capture-Phase Click Interceptor & Auto-Closer** |
 | **Anti-DevTools Hijacking**| Redirects on F12 / Inspect | **Hardware Key & Debugger Loop Neutralizer** |

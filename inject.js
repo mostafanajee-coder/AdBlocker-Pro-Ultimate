@@ -42,7 +42,7 @@
     }, true);
   } catch (_) {}
 
-  // 3. YouTube In-Stream JSON Sanitizer & Safe Player Engine (MAIN World)
+  // 3. YouTube Multi-Trap In-Stream Annihilator & Zero-Latency Engine (MAIN World)
   try {
     var isYouTube = /(?:^|\.)youtube(?:-nocookie)?\.com$/i.test(window.location.hostname);
     if (isYouTube) {
@@ -52,6 +52,7 @@
           if (obj.adPlacements) delete obj.adPlacements;
           if (obj.playerAds) delete obj.playerAds;
           if (obj.adSlots) delete obj.adSlots;
+          if (obj.adBreakHeartbeatParams) delete obj.adBreakHeartbeatParams;
           if (obj.auxiliaryUi) delete obj.auxiliaryUi;
           if (Array.isArray(obj.messages)) {
             obj.messages = obj.messages.filter(function (m) {
@@ -62,7 +63,7 @@
         return obj;
       };
 
-      // A. Hook JSON.parse to strip ad configurations at incoming network parsing
+      // Trap 2A: Hook JSON.parse to strip ad configurations at incoming network parsing
       var origJSONParse = JSON.parse;
       JSON.parse = function (text, reviver) {
         var res = origJSONParse.apply(this, arguments);
@@ -72,7 +73,7 @@
         return res;
       };
 
-      // B. Override YouTube Experiment Flags used for ad blocker detection
+      // Trap 2B: Override YouTube Experiment Flags used for ad injection & detection
       var sanitizeYtFlags = function (data) {
         if (!data || typeof data !== 'object') return data;
         try {
@@ -110,7 +111,7 @@
         });
       }
 
-      // C. Sanitize window.ytInitialPlayerResponse
+      // Trap 2C: Sanitize window.ytInitialPlayerResponse & ytInitialData
       var _ytInitialPlayerResponse = window.ytInitialPlayerResponse;
       Object.defineProperty(window, 'ytInitialPlayerResponse', {
         get: function () { return _ytInitialPlayerResponse; },
@@ -120,11 +121,51 @@
         configurable: true
       });
 
-      // D. Intercept window.fetch for /youtubei/v1/player
+      var _ytInitialData = window.ytInitialData;
+      Object.defineProperty(window, 'ytInitialData', {
+        get: function () { return _ytInitialData; },
+        set: function (val) {
+          _ytInitialData = sanitizeData(val);
+        },
+        configurable: true
+      });
+
+      // Helper: Return immediate dummy 200 OK Response for pure ad trackers
+      function createMockResponse(bodyText, contentType) {
+        var body = bodyText || '{}';
+        var type = contentType || 'application/json';
+        if (typeof Response === 'function') {
+          return new Response(body, {
+            status: 200,
+            statusText: 'OK',
+            headers: {
+              'Content-Type': type,
+              'Access-Control-Allow-Origin': '*'
+            }
+          });
+        }
+        return {
+          ok: true,
+          status: 200,
+          statusText: 'OK',
+          json: function () { return Promise.resolve(JSON.parse(body)); },
+          text: function () { return Promise.resolve(body); }
+        };
+      }
+
+      var PURE_AD_REGEX = /\/api\/stats\/ads|pagead\/|googleads\.g\.doubleclick\.net|static\.doubleclick\.net|ad\.doubleclick\.net/i;
+
+      // Trap 1A: Intercept window.fetch
       var origFetch = window.fetch;
       window.fetch = function (input, init) {
         var url = (typeof input === 'string' ? input : (input && input.url ? input.url : '')).toLowerCase();
-        if (url.indexOf('/youtubei/v1/player') !== -1) {
+
+        // FAST-PASS: Neutralize explicit ad endpoints with 200 OK in 0ms
+        if (PURE_AD_REGEX.test(url)) {
+          return Promise.resolve(createMockResponse('{}', 'application/json'));
+        }
+
+        if (url.indexOf('/youtubei/v1/player') !== -1 || url.indexOf('/youtubei/v1/next') !== -1) {
           return origFetch.apply(this, arguments).then(function (response) {
             var origJson = response.json;
             response.json = function () {
@@ -149,7 +190,51 @@
         return origFetch.apply(this, arguments);
       };
 
-      // E. SAFE Native Player API Hook (Never tampers with video.currentTime)
+      // Trap 1B: Intercept XMLHttpRequest
+      try {
+        var origXhrOpen = XMLHttpRequest.prototype.open;
+        var origXhrSend = XMLHttpRequest.prototype.send;
+        XMLHttpRequest.prototype.open = function (method, url) {
+          this._abpUrl = (typeof url === 'string' ? url : '').toLowerCase();
+          return origXhrOpen.apply(this, arguments);
+        };
+        XMLHttpRequest.prototype.send = function () {
+          if (this._abpUrl && PURE_AD_REGEX.test(this._abpUrl)) {
+            var self = this;
+            setTimeout(function () {
+              try {
+                Object.defineProperty(self, 'readyState', { value: 4, configurable: true });
+                Object.defineProperty(self, 'status', { value: 200, configurable: true });
+                Object.defineProperty(self, 'statusText', { value: 'OK', configurable: true });
+                Object.defineProperty(self, 'responseText', { value: '{}', configurable: true });
+                Object.defineProperty(self, 'response', { value: '{}', configurable: true });
+                self.dispatchEvent(new Event('readystatechange'));
+                self.dispatchEvent(new Event('load'));
+                self.dispatchEvent(new Event('loadend'));
+              } catch (_) {}
+            }, 0);
+            return;
+          }
+
+          if (this._abpUrl && (this._abpUrl.indexOf('/youtubei/v1/player') !== -1 || this._abpUrl.indexOf('/youtubei/v1/next') !== -1)) {
+            var self = this;
+            self.addEventListener('readystatechange', function () {
+              if (self.readyState === 4 && self.status === 200) {
+                try {
+                  var text = self.responseText;
+                  var parsed = JSON.parse(text);
+                  var sanitized = JSON.stringify(sanitizeData(parsed));
+                  Object.defineProperty(self, 'responseText', { value: sanitized, configurable: true });
+                  Object.defineProperty(self, 'response', { value: sanitized, configurable: true });
+                } catch (_) {}
+              }
+            }, true);
+          }
+          return origXhrSend.apply(this, arguments);
+        };
+      } catch (_) {}
+
+      // Trap 4: Poisoned Execution Layer & Auto-Play Engine
       function pulseYouTubePlayer() {
         try {
           var player = document.getElementById('movie_player') || document.querySelector('.html5-video-player');
@@ -165,13 +250,26 @@
               if (video) {
                 video.muted = true;
                 video.playbackRate = 16;
+                if (isFinite(video.duration) && video.duration > 0) {
+                  video.currentTime = video.duration + 0.5;
+                }
+              }
+            } else {
+              // Auto-Play Kickstart: If player is stuck in unstarted mode (-1), start playback immediately!
+              var state = typeof player.getPlayerState === 'function' ? player.getPlayerState() : null;
+              if (state === -1 && typeof player.playVideo === 'function') {
+                player.playVideo();
+              }
+              var normalVid = player.querySelector('video') || document.querySelector('video');
+              if (normalVid && normalVid.playbackRate > 2) {
+                normalVid.playbackRate = 1.0;
               }
             }
           }
         } catch (_) {}
       }
 
-      setInterval(pulseYouTubePlayer, 50);
+      setInterval(pulseYouTubePlayer, 25);
     }
   } catch (_) {}
 

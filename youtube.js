@@ -1,10 +1,11 @@
 /* ============================================================================
  *  youtube.js — YouTube Clean Ad Annihilator & Player Harmony Engine
  *
- *  Safe, Surgical, Non-Intrusive:
- *  - 100% normal mouse interactions (Left-click, Double-click, Right-click).
- *  - Clicks ONLY explicit Ad Skip buttons (Never touches Next Video or Chapter Skip).
- *  - Guaranteed NEVER to skip user video or jump to the end!
+ *  Safe, Surgical, Multi-Trap Defense (Version 4.2.0):
+ *  - Trap 1: Visual Masking (Zero-Flicker CSS for .ad-showing & Anti-Interruptions).
+ *  - Trap 2: Surgical Ad Skip Button auto-click.
+ *  - Trap 3: Instant Ad Zero-Seek & Speed-up when in ad-showing mode.
+ *  - Trap 4: Zero-Latency Instant Playback & Anti-Throttling Guard.
  * ========================================================================== */
 
 (function () {
@@ -34,9 +35,19 @@
     "tp-yt-paper-dialog:has(ytd-enforcement-message-view-model)",
     "tp-yt-iron-overlay-backdrop",
     "ytd-mealbar-promo-renderer",
+    "ytd-popup-container:has(ytd-mealbar-promo-renderer)",
     ".ytp-ad-avatar-lockup-card",
     ".ytp-ad-action-interstitial",
-    ".ytp-ad-image-overlay"
+    ".ytp-ad-image-overlay",
+    ".ytp-suggested-action-badge",
+    ".ytp-suggested-action-badge-expanded",
+    ".ytp-suggested-action-badge-expanded-renderer",
+    ".ytp-ad-interrupting-toast",
+    ".ytp-info-toast",
+    ".ytp-toast",
+    "ytd-notification-action-renderer[button-style='STYLE_DEFAULT']",
+    "[aria-label*='interruptions' i]",
+    "[aria-label*='انقطاعات' i]"
   ];
 
   function injectCss() {
@@ -46,13 +57,15 @@
     style.id = "abp-yt-css";
     style.textContent = HIDE_SELECTORS.join(",\n") +
       " { display: none !important; }\n" +
-      "ytd-rich-item-renderer:has(> #content > ytd-ad-slot-renderer) { display: none !important; }";
+      "ytd-rich-item-renderer:has(> #content > ytd-ad-slot-renderer) { display: none !important; }\n" +
+      // Trap 3: Stealth Visual Masking (Zero-Flicker ad suppressor)
+      ".html5-video-player.ad-showing video, .html5-video-player.ad-interrupting video { opacity: 0 !important; pointer-events: none !important; }\n" +
+      ".html5-video-player.ad-showing .ytp-ad-module, .html5-video-player.ad-showing .ytp-ad-player-overlay, .html5-video-player.ad-showing .ytp-ad-player-overlay-layout { display: none !important; }";
 
     (document.head || document.documentElement).appendChild(style);
   }
 
   // SURGICAL SELECTORS: Only match actual AD skip buttons.
-  // NEVER use broad wildcards that might match "Next video" or "Skip chapter"!
   var AD_SKIP_BUTTONS = [
     "button.ytp-skip-ad-button",
     "button.ytp-ad-skip-button",
@@ -64,7 +77,16 @@
   ].join(",");
 
   function dismissEnforcementDialog() {
-    var dialogs = document.querySelectorAll('ytd-enforcement-message-view-model, tp-yt-paper-dialog:has(ytd-enforcement-message-view-model), tp-yt-iron-overlay-backdrop, ytd-popup-container:has(ytd-enforcement-message-view-model)');
+    var dialogs = document.querySelectorAll(
+      'ytd-enforcement-message-view-model, ' +
+      'tp-yt-paper-dialog:has(ytd-enforcement-message-view-model), ' +
+      'tp-yt-iron-overlay-backdrop, ' +
+      'ytd-popup-container:has(ytd-enforcement-message-view-model), ' +
+      'ytd-mealbar-promo-renderer, ' +
+      'ytd-popup-container:has(ytd-mealbar-promo-renderer), ' +
+      '.ytp-suggested-action-badge[aria-label*="interruptions" i], ' +
+      '.ytp-suggested-action-badge[aria-label*="انقطاعات" i]'
+    );
     if (dialogs.length) {
       dialogs.forEach(function (d) {
         try { d.remove(); } catch (_) {}
@@ -86,7 +108,7 @@
     var isOverlayCard = Boolean(document.querySelector(".ytp-ad-player-overlay, .ytp-ad-player-overlay-layout"));
 
     if (isAdShowing || isOverlayCard) {
-      // 1. Click explicit ad skip button only if visible
+      // 1. Click explicit ad skip button only if present
       var skipBtns = document.querySelectorAll(AD_SKIP_BUTTONS);
       for (var i = 0; i < skipBtns.length; i++) {
         var btn = skipBtns[i];
@@ -97,19 +119,22 @@
         }
       }
 
-      // 2. Accelerate ad stream to 16x (ONLY when player is actively in ad-showing mode)
+      // 2. Poisoned Execution: Instant finish ad stream (ONLY when player is in explicit ad-showing mode)
       if (isAdShowing) {
-        var video = player.querySelector("video.html5-main-video, video.video-stream");
+        var video = player.querySelector("video.html5-main-video, video.video-stream") || document.querySelector("video");
         if (video) {
           try {
             video.muted = true;
             video.playbackRate = 16;
+            if (isFinite(video.duration) && video.duration > 0) {
+              video.currentTime = video.duration + 0.5;
+            }
           } catch (_) {}
         }
       }
     } else {
-      // 3. Ensure normal playback rate on normal video content
-      var normalVideo = player.querySelector("video.html5-main-video, video.video-stream");
+      // 3. Ensure normal playback rate on normal user video
+      var normalVideo = player.querySelector("video.html5-main-video, video.video-stream") || document.querySelector("video");
       if (normalVideo && normalVideo.playbackRate > 2) {
         normalVideo.playbackRate = 1.0;
         normalVideo.muted = false;
@@ -124,7 +149,7 @@
     setInterval(function () {
       if (document.visibilityState === "hidden") return;
       killAd();
-    }, 100);
+    }, 50);
 
     var obs = new MutationObserver(function () {
       injectCss();
@@ -135,6 +160,14 @@
     window.addEventListener("yt-navigate-finish", function () {
       injectCss();
       killAd();
+      setTimeout(function () {
+        var player = document.getElementById("movie_player") || document.querySelector(".html5-video-player");
+        if (player && typeof player.getPlayerState === "function" && player.getPlayerState() === -1) {
+          if (typeof player.playVideo === "function") {
+            player.playVideo();
+          }
+        }
+      }, 100);
     });
   }
 
