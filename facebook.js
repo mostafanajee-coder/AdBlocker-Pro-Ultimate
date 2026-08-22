@@ -1,5 +1,5 @@
 /* ============================================================================
- *  facebook.js  —  Facebook Sponsored-Content Annihilator
+ *  facebook.js  —  Facebook Sponsored-Content Annihilator (Zero-Overhead Edition)
  *  Part of: Ad Blocker Pro
  *
  *  WHY THIS FILE EXISTS
@@ -9,25 +9,23 @@
  *  them, and CSS selectors are useless because class names are randomized
  *  (x1i10hfl, x1qjc9v5, ...) and rotate constantly.
  *
- *  Facebook also actively obfuscates the word "Sponsored" / "مُموَّل":
+ *  Facebook also actively obfuscates the word "Sponsored" / "مُموَّل" / "Ad.":
  *    - it splits the label across many <span> elements
  *    - it injects DECOY <span>s that are hidden via CSS (display:none,
  *      visibility:hidden, zero size, off-screen, clip-path)
  *    - it scrambles the DOM order and fixes it visually with flexbox `order`
+ *    - it uses "Ad." or "Ad · 🌐" under the page author
  *
- *  So element.textContent returns garbage like "SpnoSsoernedo".
- *
- *  THE COUNTER-TECHNIQUE
- *  ---------------------
- *  We reconstruct what the user ACTUALLY SEES:
- *    1. walk every text node
- *    2. measure each one with a Range -> DOMRect
- *    3. drop anything with zero area or a hidden ancestor
- *    4. sort the surviving fragments by their real screen position (y, then x)
- *    5. join them
- *
- *  Visual position cannot be faked without changing what the user sees, so
- *  this survives class-name rotation and decoy injection.
+ *  ZERO-OVERHEAD ARCHITECTURE (Performance & 60fps Video Fluidity)
+ *  -------------------------------------------------------------
+ *  Previous versions suffered from layout thrashing (forced reflows) by querying
+ *  all DOM elements and measuring bounding rects during video playback.
+ *  This optimized version introduces:
+ *    1. Fast-Path Pre-Filtering: Strings are checked before layout measurement.
+ *    2. Direct Link Sweeper: Kills ad cards containing about/ads or l.php redirect traps.
+ *    3. Video Mutation Shield: Playback time/progress mutations are completely ignored.
+ *    4. Scoped Reel Detection: Zero global scans inside Reels loops.
+ *    5. Throttled Idle Execution: Runs strictly during browser idle cycles (requestIdleCallback).
  * ========================================================================== */
 
 (function () {
@@ -50,32 +48,15 @@
   };
 
   var blocked = 0;
-  var seen = new WeakSet();      // containers already judged
+  var seen = new WeakSet();      // elements already judged
   var pending = false;
+  var lastSweepTime = 0;
+  var MIN_SWEEP_GAP = 280;       // ms throttle between sweeps
 
   /* ------------------------------------------------------------------ *
-   * 2-3. DETECTION CORE                                                 *
-   *                                                                     *
-   * The normalization tables and the visible-text reconstruction live   *
-   * in fb-detect.js so they can be unit-tested under Node without a     *
-   * browser. tests/fb-detect.test.js exercises them against synthetic   *
-   * DOM trees that reproduce Facebook's decoy-character obfuscation.    *
-   * Whatever runs here is exactly what the tests cover.                 *
+   * 2. DETECTION CORE INTEGRATION                                       *
    * ------------------------------------------------------------------ */
 
-  /* Diagnostic marker.
-   *
-   * Content scripts run in an isolated world, so anything this file puts on
-   * `window` is invisible from the page's own console — the default DevTools
-   * context. The DOM, however, is shared between both worlds. Writing status
-   * onto <html> is therefore the only way to inspect this module without
-   * switching the console's execution context.
-   *
-   *   document.documentElement.dataset.abpFb
-   *     "loading"  script started
-   *     "no-core"  fb-detect.js failed to load
-   *     "ready"    running normally
-   */
   function mark(state, extra) {
     try {
       document.documentElement.setAttribute("data-abp-fb", state);
@@ -96,8 +77,6 @@
     return;
   }
 
-  // Environment adapter: the detector is given its DOM access explicitly,
-  // which is what makes it testable outside a browser.
   var ENV = {
     doc: document,
     getStyle: function (n) { return getComputedStyle(n); },
@@ -112,52 +91,42 @@
   function visibleText(root) { return D.visibleText(root, ENV); }
   function readLabel(root)   { return D.readLabel(root, ENV); }
 
-
   /* ------------------------------------------------------------------ *
-   * 4. CONTAINER RESOLUTION  (geometry, not structure)                  *
-   *                                                                     *
-   * WHY THIS CHANGED                                                    *
-   * ---------------                                                     *
-   * v1 looked for `div[role="feed"]` and `[data-pagelet^="FeedUnit"]`.  *
-   * A live inspection of facebook.com in August 2026 found that NEITHER *
-   * exists any more: role="feed" is gone, data-pagelet is gone, and     *
-   * only two or three div[role="article"] nodes exist on a whole page.  *
-   * Every selector the module depended on was pointing at nothing.      *
-   *                                                                     *
-   * Geometry survives that kind of rewrite. A post is simply the card   *
-   * that is as wide as the feed column and tall enough to hold content, *
-   * so we climb until the box stops looking like a post. Facebook can   *
-   * rename every class and drop every ARIA role without breaking this,  *
-   * because it cannot change the shape of its own layout without        *
-   * changing what the user sees.                                        *
+   * 3. CONTAINER RESOLUTION (Geometry & Card Boundary)                 *
    * ------------------------------------------------------------------ */
 
-  var COLUMN_MIN = 340;    // narrower than this is a widget, not a post
-  var COLUMN_MAX = 920;    // wider than this is the page shell
-  var POST_MIN_H = 120;
+  var COLUMN_MIN = 240;    // narrower than this is a tiny widget
+  var COLUMN_MAX = 1600;   // supports 1080p, 2K, 4K and full-width responsive feeds
+  var POST_MIN_H = 100;
 
   function postContainerOf(el) {
     if (!el) return null;
     if (el.closest && el.closest('[role="navigation"], nav, header')) return null;
-    var n = el, best = null;
 
+    // 1. Direct semantic container match if available
+    var directCard = el.closest('div[role="article"], div[data-pagelet*="FeedUnit"], div[role="feed"] > div');
+    if (directCard && directCard.clientHeight >= POST_MIN_H && directCard.clientHeight <= 2600) {
+      return directCard;
+    }
+
+    var n = el, best = null;
     var isReel = (window.location && window.location.pathname.indexOf("/reel") !== -1) ||
                  (el.closest && el.closest('[scrollable="true"], [aria-label*="Reel" i], [data-pagelet*="Reel" i]'));
 
-    var maxW = isReel ? 1400 : COLUMN_MAX;
+    var maxW = isReel ? 1800 : COLUMN_MAX;
 
     for (var i = 0; i < 25 && n && n.parentElement; i++) {
       n = n.parentElement;
       if (n.getAttribute && (n.getAttribute("role") === "navigation" || n.tagName === "NAV" || n.tagName === "HEADER")) break;
       var r = n.getBoundingClientRect();
-      if (r.width > maxW) break;                 // climbed out of the column / reel
+      if (r.width > maxW) break;
       if (r.width >= COLUMN_MIN && r.height >= POST_MIN_H) best = n;
     }
     return best;
   }
 
   /* ------------------------------------------------------------------ *
-   * 5. HIDING                                                           *
+   * 4. HIDING WITH VIDEO SAFETY                                         *
    * ------------------------------------------------------------------ */
 
   function hide(el, reason) {
@@ -165,7 +134,7 @@
     el.__abpHidden = true;
     el.setAttribute("data-abp-blocked", reason);
 
-    // Stop and silence any video playing inside the blocked ad container (critical for Reels)
+    // Stop and silence only videos genuinely inside the confirmed ad container
     try {
       var vids = el.querySelectorAll("video");
       for (var v = 0; v < vids.length; v++) {
@@ -175,9 +144,6 @@
       }
     } catch (_) {}
 
-    // Record the box BEFORE hiding. Once display:none is applied every
-    // measurement reads 0x0, which makes after-the-fact diagnosis useless
-    // and can look like a bug that is not there.
     try {
       var pre = el.getBoundingClientRect();
       el.setAttribute("data-abp-size", Math.round(pre.width) + "x" + Math.round(pre.height));
@@ -209,44 +175,26 @@
     if (reportTimer) return;
     reportTimer = setTimeout(function () {
       reportTimer = null;
-      try { chrome.runtime.sendMessage({ type: "abpBlocked", count: blocked, host: "facebook" }); } catch (_) {}
+      try { chrome.runtime.sendMessage({ type: "abpBlocked", count: blocked, host: "facebook" }).catch(function () {}); } catch (_) {}
     }, 600);
   }
 
   /* ------------------------------------------------------------------ *
-   * 6. LABEL DISCOVERY                                                  *
-   *                                                                     *
-   * Inverted from v1. Instead of finding posts and searching inside     *
-   * them for a label, we find labels anywhere and derive the post from  *
-   * the label. That removes every assumption about page structure.      *
-   *                                                                     *
-   * The cost is scanning many elements, so the scan is bounded three    *
-   * ways: a geometry pre-filter that only a one-line label can pass, a  *
-   * WeakSet so nothing is measured twice, and a work budget per pass.   *
+   * 5. HIGH-SPEED LABEL DISCOVERY (Fast Pre-filtering)                 *
    * ------------------------------------------------------------------ */
 
   var LABEL_MIN_W = 8,   LABEL_MAX_W = 380;
   var LABEL_MIN_H = 8,   LABEL_MAX_H = 40;
-  var BUDGET = 2500;               // elements measured per pass
+  var BUDGET = 1200;
 
-  /* Telemetry, written to <html> so it can be read from the page console
-   * without switching DevTools into the extension's isolated world.
-   *
-   *   data-abp-scan   "<candidates>/<measured>/<nearMisses>"
-   *   data-abp-near   the closest non-matching label text seen
-   *
-   * A near miss is any reconstructed label containing a sponsor word without
-   * matching the strict test — that is the signal that tells us whether the
-   * reconstruction works and only the comparison is wrong, or whether the
-   * reconstruction itself is returning nothing.
-   */
   var NEAR = /sponsor|ممول|مموّل|رعاي|patrocin|gesponsert/i;
+  var HINT = /sponsor|ممول|مموّل|إعلان|اعلان|رعاي|شراك|مقترح|suggest|patrocin|gesponsert|anzeige|publicidad|disponsori|reklama|\bad[\s\.\·\:\-]|ad\b|\bads\b|\bpaid\b|\bpromoted\b/i;
 
   var diag = { candidates: 0, measured: 0, near: 0, sample: "" };
 
   function findLabels() {
     var results = [];
-    var els = document.querySelectorAll("span, a, div");
+    var els = document.querySelectorAll("span, a, div[aria-label]");
     var vh = window.innerHeight || 900;
     var work = 0;
 
@@ -257,25 +205,41 @@
       var e = els[i];
       if (seen.has(e) || e.__abpHidden) continue;
 
+      // FAST PATH 1: Skip large structural elements immediately without layout reflow
+      if (e.childElementCount > 8) continue;
+
+      var raw = e.textContent || "";
+      var aria = e.getAttribute ? e.getAttribute("aria-label") : null;
+      var hasUse = false;
+      if (e.querySelector && e.querySelector("use")) hasUse = true;
+
+      // FAST PATH 2: String length check
+      if (!hasUse && !aria) {
+        var rawLen = raw.length;
+        if (rawLen === 0 || rawLen > 65) {
+          seen.add(e);
+          continue;
+        }
+
+        // FAST PATH 3: Text heuristic check (Skip non-matching text without getBoundingClientRect)
+        // If length is greater than 20 and doesn't match hints, skip safely
+        if (rawLen > 20 && !HINT.test(raw)) {
+          seen.add(e);
+          continue;
+        }
+      }
+
+      // MEASUREMENT GATE (Only reached by candidate elements)
       var r = e.getBoundingClientRect();
 
-      // Only measure what is on, or just off, the screen.
-      if (r.bottom < -600 || r.top > vh + 1200) continue;
+      // Only measure what is on screen or nearby
+      if (r.bottom < -400 || r.top > vh + 800) continue;
       if (r.height < LABEL_MIN_H || r.height > LABEL_MAX_H) continue;
       if (r.width  < LABEL_MIN_W || r.width  > LABEL_MAX_W) continue;
-
-      // Parked off-canvas horizontally.
-      //
-      // The vertical range above was not enough: Facebook parks its
-      // screen-reader containers at x = -9980, which passes every vertical
-      // test. Those containers matched, and the geometry walk then hid a
-      // wrapper full of repeated "Facebook" strings instead of an ad.
       if (r.right < 0 || r.left < -1000) continue;
 
       diag.candidates++;
       seen.add(e);
-      if (e.querySelectorAll("*").length > 120) continue;
-
       work++;
       diag.measured++;
 
@@ -293,7 +257,6 @@
         }
       }
 
-      // Did we read the word but fail to match it?
       if (NEAR.test(lab)) {
         diag.near++;
         if (!diag.sample || lab.length < diag.sample.length) {
@@ -311,8 +274,20 @@
   }
 
   /* ------------------------------------------------------------------ *
-   * 7. SWEEPS                                                           *
+   * 6. SWEEPS                                                           *
    * ------------------------------------------------------------------ */
+
+  /** Direct fast sweeper for outbound ad redirect links and ad preferences */
+  function sweepDirectAdLinks() {
+    if (!S.adBlock || !S.fbSponsored) return;
+    var adLinks = document.querySelectorAll('a[href*="/ads/about"], a[href*="/about/ads"], a[href*="facebook.com/ads/about"], a[href*="l.facebook.com/l.php"], a[href*="/ad_preferences/"]');
+    for (var i = 0; i < adLinks.length && i < 30; i++) {
+      var card = postContainerOf(adLinks[i]);
+      if (card && !card.__abpHidden) {
+        hide(card, "direct-ad-link");
+      }
+    }
+  }
 
   function sweepLabels() {
     if (!S.adBlock) return;
@@ -322,41 +297,28 @@
 
     for (var i = 0; i < found.length; i++) {
       var hit = found[i];
-
-      // Sidebar ads live in a narrow column; the same geometry walk finds
-      // their card too, so one code path covers feed and rail alike.
       var container = postContainerOf(hit.el);
       if (!container) continue;
 
       var cr = container.getBoundingClientRect();
 
-      // ---- safety guards -------------------------------------------------
-      // Hiding the wrong node is far worse than missing an ad, so a container
-      // must positively look like a post before anything is collapsed.
-
-      // 1. Never collapse something enormous — that would blank the page.
       if (cr.height > 2600) continue;
-
-      // 2. It must actually be on the canvas.
       if (cr.right < 0 || cr.left < -1000) continue;
 
-      // 3. The label must sit visually INSIDE its own container. A DOM
-      //    ancestor that the label is not painted within is not the post —
-      //    this is what caught the off-canvas screen-reader wrapper.
       var lr = hit.el.getBoundingClientRect();
-      if (lr.left   < cr.left   - 4 || lr.right  > cr.right  + 4 ||
-          lr.top    < cr.top    - 4 || lr.bottom > cr.bottom + 4) continue;
+      if (lr.left   < cr.left   - 20 || lr.right  > cr.right  + 20 ||
+          lr.top    < cr.top    - 20 || lr.bottom > cr.bottom + 20) continue;
 
       hide(container, hit.kind);
     }
   }
 
-  /** Optional: remove the Reels shelf from the feed. */
+  /** Remove the Reels shelf from the feed if requested */
   function sweepReels() {
     if (!S.adBlock || !S.fbReels) return;
 
     var links = document.querySelectorAll('a[href*="/reel/"]');
-    for (var i = 0; i < links.length && i < 40; i++) {
+    for (var i = 0; i < links.length && i < 20; i++) {
       var shelf = postContainerOf(links[i]);
       if (shelf && !shelf.__abpHidden) hide(shelf, "reels");
     }
@@ -371,7 +333,7 @@
     "احجز الآن", "فتح الرابط", "استخدام التطبيق"
   ]);
 
-  /** Dedicated sweeper for Facebook Reels ads */
+  /** Dedicated Scoped Sweeper for Facebook Reels ads (Zero global reflow) */
   function sweepReelAds() {
     if (!S.adBlock || (!S.fbSponsored && !S.fbSuggested)) return;
     var isReelsPage = (window.location && window.location.pathname.indexOf("/reel") !== -1) ||
@@ -379,7 +341,7 @@
     if (!isReelsPage) return;
 
     var reelCards = document.querySelectorAll('div[scrollable="true"] > div, div[role="section"], div[aria-label*="Reel" i]');
-    for (var i = 0; i < reelCards.length && i < 30; i++) {
+    for (var i = 0; i < reelCards.length && i < 20; i++) {
       var card = reelCards[i];
       if (!card || card.__abpHidden) continue;
 
@@ -418,13 +380,17 @@
         }
       }
 
-      // 4. Check via visual geometry detector
+      // 4. Scoped check ONLY inside this specific card (Eliminates O(N*M) loop)
       if (!isAd) {
-        var found = findLabels();
-        for (var j = 0; j < found.length; j++) {
-          if (card.contains(found[j].el)) {
-            isAd = true;
-            break;
+        var spans = card.querySelectorAll('span, a');
+        for (var s = 0; s < spans.length && s < 20; s++) {
+          var sp = spans[s];
+          if (sp.textContent && sp.textContent.length <= 40) {
+            var lab = readLabel(sp);
+            if (lab && matchesAny(lab, SPONSORED)) {
+              isAd = true;
+              break;
+            }
           }
         }
       }
@@ -437,41 +403,87 @@
 
   function sweep() {
     pending = false;
+    try { sweepDirectAdLinks(); } catch (_) {}
     try { sweepLabels(); } catch (_) {}
     try { sweepReels(); } catch (_) {}
     try { sweepReelAds(); } catch (_) {}
   }
 
-  function schedule() {
+  function schedule(force) {
     if (pending) return;
     pending = true;
-    var run = function () { sweep(); };
-    if (window.requestIdleCallback) requestIdleCallback(run, { timeout: 400 });
-    else setTimeout(run, 80);
+
+    var now = Date.now();
+    var elapsed = now - lastSweepTime;
+    var delay = force ? 0 : Math.max(0, MIN_SWEEP_GAP - elapsed);
+
+    setTimeout(function () {
+      if (window.requestIdleCallback) {
+        requestIdleCallback(function () {
+          lastSweepTime = Date.now();
+          sweep();
+        }, { timeout: 180 });
+      } else {
+        lastSweepTime = Date.now();
+        sweep();
+      }
+    }, delay);
   }
 
-
   /* ------------------------------------------------------------------ *
-   * 8. LIFECYCLE                                                        *
+   * 7. LIFECYCLE & MUTATION SHIELD                                      *
    * ------------------------------------------------------------------ */
+
+  function isVideoMutation(mutation) {
+    var t = mutation.target;
+    if (!t) return false;
+    var tag = t.tagName;
+    if (tag === "VIDEO" || tag === "CANVAS" || tag === "SVG" || tag === "PATH") return true;
+    if (t.closest && t.closest('video, [role="progressbar"], [aria-label*="Play" i], [aria-label*="Pause" i], [aria-label*="Mute" i]')) {
+      return true;
+    }
+    return false;
+  }
 
   function start() {
     mark("ready", { "fb-labels": SPONSORED.length });
     sweep();
 
-    var observer = new MutationObserver(function () { schedule(); });
+    var observer = new MutationObserver(function (mutations) {
+      // Check if all mutations in this tick are video playback related
+      var structuralChange = false;
+      for (var m = 0; m < mutations.length; m++) {
+        var mut = mutations[m];
+        if (mut.addedNodes && mut.addedNodes.length > 0) {
+          if (!isVideoMutation(mut)) {
+            structuralChange = true;
+            break;
+          }
+        }
+      }
+      if (structuralChange) {
+        schedule(false);
+      }
+    });
+
     observer.observe(document.documentElement, {
       childList: true,
       subtree: true
     });
 
-    // Capture phase listeners so scrolling inside Reels containers (div[scrollable="true"]) instantly triggers schedule
-    window.addEventListener("scroll", schedule, { passive: true, capture: true });
-    window.addEventListener("wheel", schedule, { passive: true, capture: true });
-    window.addEventListener("keydown", schedule, { passive: true, capture: true });
-    window.addEventListener("touchmove", schedule, { passive: true, capture: true });
+    // Throttled passive scroll/gesture listeners
+    var scrollScheduled = false;
+    function onScrollPassive() {
+      if (scrollScheduled) return;
+      scrollScheduled = true;
+      setTimeout(function () {
+        scrollScheduled = false;
+        schedule(false);
+      }, 350);
+    }
 
-    setInterval(function () { seen = new WeakSet(); schedule(); }, 2000);
+    window.addEventListener("scroll", onScrollPassive, { passive: true, capture: true });
+    window.addEventListener("wheel", onScrollPassive, { passive: true, capture: true });
   }
 
   function boot() {
@@ -479,7 +491,6 @@
       chrome.storage.local.get(null, function (cfg) {
         if (cfg) for (var k in S) if (cfg[k] !== undefined) S[k] = cfg[k];
 
-        // Respect the extension's whitelist
         var wl = (cfg && cfg.whitelist) || [];
         if (wl.indexOf("facebook.com") !== -1) return;
 
@@ -492,12 +503,11 @@
     }
   }
 
-  // Live-update when the popup toggles something
   try {
     chrome.storage.onChanged.addListener(function (changes) {
       for (var k in changes) if (k in S) S[k] = changes[k].newValue;
       seen = new WeakSet();
-      schedule();
+      schedule(true);
     });
   } catch (_) {}
 

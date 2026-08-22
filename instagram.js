@@ -1,0 +1,202 @@
+/* ============================================================================
+ * instagram.js — conservative sponsored post/Reel remover for Instagram
+ *
+ * Scoped to instagram.com by manifest.json. It hides only a post container
+ * with an exact sponsored label or Meta's ads/about link, and uses mutation
+ * events instead of a permanent polling timer.
+ * ========================================================================== */
+
+(function (root, factory) {
+  "use strict";
+
+  var api = factory();
+  if (typeof module !== "undefined" && module.exports) module.exports = api;
+  if (root && root.document) api.start(root);
+})(typeof self !== "undefined" ? self : this, function () {
+  "use strict";
+
+  var LABELS = [
+    "sponsored",
+    "paid partnership",
+    "advertisement",
+    "ممول",
+    "اعلان",
+    "برعاية",
+    "محتوى ممول"
+  ];
+
+  function normalize(text) {
+    return String(text || "")
+      .replace(/[\u200B-\u200F\u202A-\u202E\u2060-\u206F\u034F\uFEFF]/g, "")
+      .replace(/[\u0610-\u061A\u064B-\u065F\u0670\u06D6-\u06ED]/g, "")
+      .replace(/ـ/g, "")
+      .replace(/[إأآٱ]/g, "ا")
+      .replace(/\s+/g, " ")
+      .trim()
+      .toLowerCase();
+  }
+
+  function isSponsoredLabel(text) {
+    var value = normalize(text);
+    return LABELS.indexOf(value) !== -1;
+  }
+
+  function isWhitelisted(hostname, list) {
+    if (!hostname || !Array.isArray(list)) return false;
+    var parts = hostname.toLowerCase().split(".");
+    for (var i = 0; i < parts.length - 1; i++) {
+      if (list.indexOf(parts.slice(i).join(".")) !== -1) return true;
+    }
+    return false;
+  }
+
+  function start(win) {
+    if (win.__abpInstagramAds__) return;
+    win.__abpInstagramAds__ = true;
+
+    var doc = win.document;
+    var enabled = true;
+    var pending = new Set();
+    var queued = false;
+
+    function installStyle() {
+      if (doc.getElementById("abp-instagram-ad-css")) return;
+      var style = doc.createElement("style");
+      style.id = "abp-instagram-ad-css";
+      style.textContent = "article[data-abp-instagram-ad='1'] { display: none !important; }";
+      (doc.head || doc.documentElement).appendChild(style);
+    }
+
+    function articleIsSponsored(article) {
+      if (!article || article.nodeType !== 1) return false;
+
+      try {
+        if (article.querySelector(
+          'a[href*="/ads/about"], a[href*="about/ads"], [data-ad-preview]'
+        )) return true;
+      } catch (_) {}
+
+      var nodes;
+      try { nodes = article.querySelectorAll("span, a, [aria-label]"); } catch (_) { return false; }
+
+      // Bound each card scan. A normal Instagram post is far below this, but
+      // the limit prevents a malformed subtree from causing expensive walks.
+      for (var i = 0; i < nodes.length && i < 300; i++) {
+        var node = nodes[i];
+        var aria = "";
+        var text = "";
+        try {
+          aria = node.getAttribute("aria-label") || node.getAttribute("title") || "";
+          text = node.textContent || "";
+        } catch (_) {}
+        if (isSponsoredLabel(aria)) return true;
+        if (!isSponsoredLabel(text)) continue;
+
+        // Instagram's sponsored marker is in the account/header area. Do not
+        // hide a legitimate post merely because its caption says "Sponsored".
+        try {
+          if (node.closest("header")) return true;
+          var cardRect = article.getBoundingClientRect();
+          var labelRect = node.getBoundingClientRect();
+          if (cardRect.height > 0 && labelRect.height > 0 &&
+              labelRect.top <= cardRect.top + Math.min(260, cardRect.height * 0.4)) {
+            return true;
+          }
+        } catch (_) {}
+      }
+      return false;
+    }
+
+    function hideArticle(article) {
+      if (!article || article.getAttribute("data-abp-instagram-ad") === "1") return;
+      article.setAttribute("data-abp-instagram-ad", "1");
+      try {
+        var videos = article.querySelectorAll("video");
+        for (var i = 0; i < videos.length; i++) {
+          videos[i].pause();
+          videos[i].muted = true;
+        }
+      } catch (_) {}
+    }
+
+    function inspectArticle(article) {
+      if (!enabled || !article || article.nodeType !== 1) return;
+      if (articleIsSponsored(article)) hideArticle(article);
+    }
+
+    function inspect(rootNode) {
+      if (!enabled || !rootNode) return;
+
+      if (rootNode.nodeType === 1) {
+        if (rootNode.matches && rootNode.matches("article")) inspectArticle(rootNode);
+        if (rootNode.closest) inspectArticle(rootNode.closest("article"));
+      }
+
+      var articles;
+      try { articles = rootNode.querySelectorAll ? rootNode.querySelectorAll("article") : []; }
+      catch (_) { articles = []; }
+      for (var i = 0; i < articles.length; i++) inspectArticle(articles[i]);
+    }
+
+    function flush() {
+      queued = false;
+      var roots = Array.from(pending);
+      pending.clear();
+      for (var i = 0; i < roots.length; i++) inspect(roots[i]);
+    }
+
+    function schedule(node) {
+      if (!node) return;
+      pending.add(node);
+      if (queued) return;
+      queued = true;
+      if (typeof queueMicrotask === "function") queueMicrotask(flush);
+      else Promise.resolve().then(flush);
+    }
+
+    function revealAll() {
+      var hidden = doc.querySelectorAll("article[data-abp-instagram-ad='1']");
+      for (var i = 0; i < hidden.length; i++) {
+        hidden[i].removeAttribute("data-abp-instagram-ad");
+      }
+    }
+
+    function applySettings(settings) {
+      settings = settings || {};
+      enabled = settings.adBlock !== false &&
+                !isWhitelisted(win.location.hostname, settings.whitelist || []);
+      if (enabled) schedule(doc);
+      else revealAll();
+    }
+
+    installStyle();
+    try {
+      win.chrome.storage.local.get(["adBlock", "whitelist"], applySettings);
+      win.chrome.storage.onChanged.addListener(function () {
+        win.chrome.storage.local.get(["adBlock", "whitelist"], applySettings);
+      });
+    } catch (_) {
+      applySettings({});
+    }
+
+    if (typeof win.MutationObserver === "function") {
+      var observer = new win.MutationObserver(function (records) {
+        for (var i = 0; i < records.length; i++) {
+          var added = records[i].addedNodes;
+          if (!added || added.length === 0) schedule(records[i].target);
+          for (var j = 0; added && j < added.length; j++) schedule(added[j]);
+        }
+      });
+      observer.observe(doc.documentElement, { childList: true, subtree: true });
+    }
+
+    win.addEventListener("load", function () { schedule(doc); }, { once: true });
+    schedule(doc);
+  }
+
+  return {
+    normalize: normalize,
+    isSponsoredLabel: isSponsoredLabel,
+    start: start
+  };
+});

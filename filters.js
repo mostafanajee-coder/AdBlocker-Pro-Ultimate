@@ -259,28 +259,38 @@ const FILTERS = {
     if (onProgress) onProgress("Installing " + all.length.toLocaleString() + " rules…");
 
     // Replace the whole dynamic set atomically.
-    const existing = await chrome.declarativeNetRequest.getDynamicRules();
-    const removeIds = existing.map((r) => r.id);
+    try {
+      const existing = await chrome.declarativeNetRequest.getDynamicRules();
+      const removeIds = existing.map((r) => r.id);
 
-    // Chrome rejects oversized single calls; install in batches.
-    await chrome.declarativeNetRequest.updateDynamicRules({
-      removeRuleIds: removeIds,
-      addRules: []
-    });
-
-    const BATCH = 4000;
-    for (let i = 0; i < all.length; i += BATCH) {
+      // Chrome rejects oversized single calls; install in batches.
       await chrome.declarativeNetRequest.updateDynamicRules({
-        addRules: all.slice(i, i + BATCH)
+        removeRuleIds: removeIds,
+        addRules: []
       });
-      if (onProgress) onProgress("Installing " + Math.min(i + BATCH, all.length).toLocaleString() +
-                                 " / " + all.length.toLocaleString());
+
+      const BATCH = 2000;
+      for (let i = 0; i < all.length; i += BATCH) {
+        try {
+          await chrome.declarativeNetRequest.updateDynamicRules({
+            addRules: all.slice(i, i + BATCH)
+          });
+        } catch (batchErr) {
+          console.warn("[Filters] Batch install warning:", batchErr.message);
+        }
+        if (onProgress) onProgress("Installing " + Math.min(i + BATCH, all.length).toLocaleString() +
+                                   " / " + all.length.toLocaleString());
+      }
+    } catch (ruleErr) {
+      console.warn("[Filters] Dynamic rules update failed:", ruleErr.message);
     }
 
-    await chrome.storage.local.set({
-      filterReport: report,
-      [FILTERS.CSS_KEY]: Array.from(selectors).slice(0, 4000)
-    });
+    try {
+      await chrome.storage.local.set({
+        filterReport: report,
+        [FILTERS.CSS_KEY]: Array.from(selectors).slice(0, 4000)
+      });
+    } catch (_) {}
 
     return report;
   },

@@ -46,29 +46,36 @@ function isWhitelisted(hostname, whitelist) {
 }
 
 function updateDynamicInjection(settings) {
-  chrome.scripting.unregisterContentScripts({ ids: ["anti-adblock-script"] }).catch(function () {});
+  if (!chrome.scripting) return;
+  try {
+    chrome.scripting.getRegisteredContentScripts({ ids: ["anti-adblock-script"] }).then(function (scripts) {
+      if (scripts && scripts.length > 0) {
+        return chrome.scripting.unregisterContentScripts({ ids: ["anti-adblock-script"] });
+      }
+    }).catch(function () {}).then(function () {
+      if (!settings || !settings.antiAdblock) return;
 
-  if (!settings.antiAdblock) return;
+      var excludeMatches = [];
+      var wl = settings.whitelist || [];
+      for (var i = 0; i < wl.length; i++) {
+        var d = wl[i];
+        if (d) {
+          excludeMatches.push("*://" + d + "/*");
+          excludeMatches.push("*://*." + d + "/*");
+        }
+      }
 
-  var excludeMatches = [];
-  var wl = settings.whitelist || [];
-  for (var i = 0; i < wl.length; i++) {
-    var d = wl[i];
-    excludeMatches.push("*://" + d + "/*");
-    excludeMatches.push("*://*." + d + "/*");
-  }
-
-  chrome.scripting.registerContentScripts([{
-    id: "anti-adblock-script",
-    matches: ["<all_urls>"],
-    excludeMatches: excludeMatches,
-    js: ["inject.js"],
-    runAt: "document_start",
-    world: "MAIN",
-    allFrames: true
-  }]).catch(function (err) {
-    console.error("registerContentScripts failed:", err.message);
-  });
+      chrome.scripting.registerContentScripts([{
+        id: "anti-adblock-script",
+        matches: ["<all_urls>"],
+        excludeMatches: excludeMatches,
+        js: ["inject.js"],
+        runAt: "document_start",
+        world: "MAIN",
+        allFrames: true
+      }]).catch(function () {});
+    }).catch(function () {});
+  } catch (_) {}
 }
 
 /* ---------------------------------------------------------------- *
@@ -82,7 +89,11 @@ async function rebuildFilters(notify) {
   rebuilding = true;
   try {
     const report = await FILTERS.rebuild(function (msg) {
-      if (notify) { try { chrome.runtime.sendMessage({ type: "filterProgress", msg }); } catch (_) {} }
+      if (notify) {
+        try {
+          chrome.runtime.sendMessage({ type: "filterProgress", msg }).catch(function () {});
+        } catch (_) {}
+      }
     });
     return { ok: true, report };
   } catch (e) {
@@ -93,12 +104,14 @@ async function rebuildFilters(notify) {
 }
 
 /* Refresh once a day, the way real filter lists expect. */
-chrome.alarms.create("filterRefresh", { periodInMinutes: 24 * 60, delayInMinutes: 60 });
+try {
+  chrome.alarms.create("filterRefresh", { periodInMinutes: 24 * 60, delayInMinutes: 60 });
+} catch (_) {}
 
 chrome.alarms.onAlarm.addListener(function (alarm) {
   if (alarm.name !== "filterRefresh") return;
   chrome.storage.local.get(["useFilterLists"], function (d) {
-    if (d.useFilterLists !== false) rebuildFilters(false);
+    if (d && d.useFilterLists !== false) rebuildFilters(false);
   });
 });
 
@@ -106,11 +119,11 @@ chrome.runtime.onInstalled.addListener(function () {
   chrome.storage.local.get(null, function (existing) {
     const settings = {};
     for (const key of Object.keys(DEFAULTS)) {
-      settings[key] = existing[key] !== undefined ? existing[key] : DEFAULTS[key];
+      settings[key] = (existing && existing[key] !== undefined) ? existing[key] : DEFAULTS[key];
     }
     chrome.storage.local.set(settings, function () {
       updateDynamicInjection(settings);
-      if (settings.useFilterLists !== false && !settings.filterReport) {
+      if (settings.useFilterLists !== false && (!existing || !existing.filterReport)) {
         rebuildFilters(false);
       }
     });
@@ -119,30 +132,34 @@ chrome.runtime.onInstalled.addListener(function () {
 
 /* Badge: live count of items the Facebook module removed in this tab. */
 function paintBadge(tabId, count) {
-  if (tabId === undefined) return;
+  if (tabId === undefined || tabId === null || tabId < 0) return;
   try {
-    chrome.action.setBadgeText({ tabId: tabId, text: count > 0 ? String(count) : "" });
-    chrome.action.setBadgeBackgroundColor({ tabId: tabId, color: "#e53935" });
+    chrome.action.setBadgeText({ tabId: tabId, text: count > 0 ? String(count) : "" }).catch(function () {});
+    chrome.action.setBadgeBackgroundColor({ tabId: tabId, color: "#e53935" }).catch(function () {});
   } catch (_) {}
 }
 
 chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
+  if (!msg || !msg.type) return false;
+
   switch (msg.type) {
     case "abpBlocked":
       paintBadge(sender.tab && sender.tab.id, msg.count);
       chrome.storage.local.get(["totalBlocked"], function (d) {
-        chrome.storage.local.set({ totalBlocked: (d.totalBlocked || 0) + 1 });
+        chrome.storage.local.set({ totalBlocked: ((d && d.totalBlocked) || 0) + 1 });
       });
       return false;
 
     case "getSettings":
       chrome.storage.local.get(null, function (data) {
-        sendResponse(data);
+        sendResponse(data || DEFAULTS);
       });
       return true;
 
     case "rebuildFilters":
-      rebuildFilters(true).then(sendResponse);
+      rebuildFilters(true).then(sendResponse).catch(function (e) {
+        sendResponse({ ok: false, error: e.message });
+      });
       return true;
 
     case "clearFilters":
@@ -151,17 +168,20 @@ chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
       return true;
 
     case "filterCount":
-      FILTERS.count().then(function (n) { sendResponse({ count: n }); });
+      FILTERS.count().then(function (n) { sendResponse({ count: n }); })
+                     .catch(function () { sendResponse({ count: 0 }); });
       return true;
 
     case "updateSettings":
       chrome.storage.local.set(msg.settings, function () {
-        if (msg.settings.strictTracking !== undefined) {
+        if (msg.settings && msg.settings.strictTracking !== undefined) {
           const enable = msg.settings.strictTracking === true;
-          chrome.declarativeNetRequest.updateEnabledRulesets({
-            enableRulesetIds: enable ? ["tracking"] : [],
-            disableRulesetIds: enable ? [] : ["tracking"]
-          });
+          try {
+            chrome.declarativeNetRequest.updateEnabledRulesets({
+              enableRulesetIds: enable ? ["tracking"] : [],
+              disableRulesetIds: enable ? [] : ["tracking"]
+            }).catch(function () {});
+          } catch (_) {}
         }
         chrome.storage.local.get(["antiAdblock", "whitelist"], function (data) {
           updateDynamicInjection(data);
@@ -172,7 +192,7 @@ chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
 
     case "toggleWhitelist":
       chrome.storage.local.get(["whitelist", "antiAdblock"], function (data) {
-        let whitelist = data.whitelist || DEFAULTS.whitelist;
+        let whitelist = (data && data.whitelist) || DEFAULTS.whitelist;
         const idx = whitelist.indexOf(msg.hostname);
         if (idx !== -1) {
           whitelist.splice(idx, 1);
@@ -180,7 +200,7 @@ chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
           whitelist.push(msg.hostname);
         }
         chrome.storage.local.set({ whitelist: whitelist }, function () {
-          updateDynamicInjection({ antiAdblock: data.antiAdblock, whitelist: whitelist });
+          updateDynamicInjection({ antiAdblock: (data && data.antiAdblock), whitelist: whitelist });
           sendResponse({ whitelist: whitelist });
         });
       });

@@ -1,18 +1,30 @@
 /* ============================================================================
- *  youtube.js — YouTube Clean Ad Annihilator & Player Harmony Engine
+ * youtube.js — event-driven YouTube visual guard and instant fallback
  *
- *  Safe, Surgical, Multi-Trap Defense (Version 4.2.0):
- *  - Trap 1: Visual Masking (Zero-Flicker CSS for .ad-showing & Anti-Interruptions).
- *  - Trap 2: Surgical Ad Skip Button auto-click.
- *  - Trap 3: Instant Ad Zero-Seek & Speed-up when in ad-showing mode.
- *  - Trap 4: Zero-Latency Instant Playback & Anti-Throttling Guard.
+ * Network/player data is handled by youtube-main.js. This isolated-world
+ * companion ensures no ad frame or skip button is painted, and performs one
+ * immediate end-seek only if YouTube still marks the player as an active ad.
+ * There is no playback acceleration and no permanent polling loop.
  * ========================================================================== */
 
 (function () {
   "use strict";
 
-  if (window.__abpYT__) return;
-  window.__abpYT__ = true;
+  if (window.__abpYouTubeVisualV2__) return;
+  window.__abpYouTubeVisualV2__ = true;
+
+  var ROOT_DISABLED = "data-abp-yt-disabled";
+  var ROOT_AD_ACTIVE = "data-abp-yt-ad-active";
+  var CSS_ID = "abp-yt-zero-ad-css";
+  var enabled = true;
+  var queued = false;
+  var player = null;
+  var playerObserver = null;
+  var burstId = 0;
+  var burstFrames = 0;
+  var lastVideo = null;
+  var previousMuted = false;
+  var videoWasPlaying = false;
 
   var HIDE_SELECTORS = [
     "ytd-ad-slot-renderer",
@@ -25,152 +37,272 @@
     "ytd-promoted-video-renderer",
     "ytd-compact-promoted-video-renderer",
     "ytd-display-ad-renderer",
+    "ytd-player-legacy-desktop-watch-ads-renderer",
+    "ytd-companion-slot-renderer",
     "ytm-promoted-video-renderer",
     "#masthead-ad",
-    "#player-ads",
+    ".ytp-ad-module",
     ".ytp-ad-overlay-container",
-    ".ytd-merch-shelf-renderer",
-    "ytd-engagement-panel-section-list-renderer[target-id='engagement-panel-ads']",
-    "ytd-enforcement-message-view-model",
-    "tp-yt-paper-dialog:has(ytd-enforcement-message-view-model)",
-    "tp-yt-iron-overlay-backdrop",
-    "ytd-mealbar-promo-renderer",
-    "ytd-popup-container:has(ytd-mealbar-promo-renderer)",
+    ".ytp-ad-player-overlay",
+    ".ytp-ad-player-overlay-layout",
+    ".ytp-ad-text",
+    ".ytp-ad-preview-container",
+    ".ytp-ad-message-container",
     ".ytp-ad-avatar-lockup-card",
     ".ytp-ad-action-interstitial",
     ".ytp-ad-image-overlay",
-    ".ytp-suggested-action-badge",
-    ".ytp-suggested-action-badge-expanded",
-    ".ytp-suggested-action-badge-expanded-renderer",
-    ".ytp-ad-interrupting-toast",
-    ".ytp-info-toast",
-    ".ytp-toast",
-    "ytd-notification-action-renderer[button-style='STYLE_DEFAULT']",
-    "[aria-label*='interruptions' i]",
-    "[aria-label*='انقطاعات' i]"
+    ".ytp-ad-skip-button-container",
+    ".ytp-ad-skip-button-slot",
+    "button.ytp-skip-ad-button",
+    "button.ytp-ad-skip-button",
+    "button.ytp-ad-skip-button-modern",
+    "ytd-engagement-panel-section-list-renderer[target-id='engagement-panel-ads']",
+    "ytd-enforcement-message-view-model",
+    "tp-yt-paper-dialog:has(ytd-enforcement-message-view-model)",
+    "ytd-mealbar-promo-renderer",
+    "ytd-popup-container:has(ytd-mealbar-promo-renderer)"
   ];
 
-  function injectCss() {
-    if (document.getElementById("abp-yt-css")) return;
-
-    var style = document.createElement("style");
-    style.id = "abp-yt-css";
-    style.textContent = HIDE_SELECTORS.join(",\n") +
-      " { display: none !important; }\n" +
-      "ytd-rich-item-renderer:has(> #content > ytd-ad-slot-renderer) { display: none !important; }\n" +
-      // Trap 3: Stealth Visual Masking (Zero-Flicker ad suppressor)
-      ".html5-video-player.ad-showing video, .html5-video-player.ad-interrupting video { opacity: 0 !important; pointer-events: none !important; }\n" +
-      ".html5-video-player.ad-showing .ytp-ad-module, .html5-video-player.ad-showing .ytp-ad-player-overlay, .html5-video-player.ad-showing .ytp-ad-player-overlay-layout { display: none !important; }";
-
-    (document.head || document.documentElement).appendChild(style);
-  }
-
-  // SURGICAL SELECTORS: Only match actual AD skip buttons.
-  var AD_SKIP_BUTTONS = [
+  var SKIP_SELECTORS = [
     "button.ytp-skip-ad-button",
     "button.ytp-ad-skip-button",
     "button.ytp-ad-skip-button-modern",
     ".ytp-ad-skip-button-slot button",
-    ".ytp-ad-skip-button-container button",
-    ".ytp-ad-skip-button-modern",
-    ".ytp-skip-ad-button"
+    ".ytp-ad-skip-button-container button"
   ].join(",");
 
-  function dismissEnforcementDialog() {
-    var dialogs = document.querySelectorAll(
-      'ytd-enforcement-message-view-model, ' +
-      'tp-yt-paper-dialog:has(ytd-enforcement-message-view-model), ' +
-      'tp-yt-iron-overlay-backdrop, ' +
-      'ytd-popup-container:has(ytd-enforcement-message-view-model), ' +
-      'ytd-mealbar-promo-renderer, ' +
-      'ytd-popup-container:has(ytd-mealbar-promo-renderer), ' +
-      '.ytp-suggested-action-badge[aria-label*="interruptions" i], ' +
-      '.ytp-suggested-action-badge[aria-label*="انقطاعات" i]'
-    );
-    if (dialogs.length) {
-      dialogs.forEach(function (d) {
-        try { d.remove(); } catch (_) {}
-      });
-      var video = document.querySelector('video.html5-main-video, video.video-stream');
-      if (video && video.paused) {
-        try { video.play(); } catch (_) {}
-      }
+  function root() {
+    return document.documentElement;
+  }
+
+  function installCss() {
+    if (document.getElementById(CSS_ID)) return;
+
+    var style = document.createElement("style");
+    style.id = CSS_ID;
+
+    var prefix = "html:not([" + ROOT_DISABLED + "='1']) ";
+    var hidden = HIDE_SELECTORS.map(function (selector) {
+      return prefix + selector;
+    }).join(",\n");
+
+    style.textContent = hidden + " { display: none !important; visibility: hidden !important; }\n" +
+      // Hide the media surface through CSS as soon as YouTube adds its ad
+      // class; this happens before MutationObserver callbacks and prevents a
+      // single accelerated-ad frame from becoming visible.
+      prefix + "#movie_player.ad-showing .html5-video-container,\n" +
+      prefix + "#movie_player.ad-interrupting .html5-video-container {\n" +
+      "  opacity: 0 !important; visibility: hidden !important;\n" +
+      "}\n" +
+      prefix + "#movie_player.ad-showing::after,\n" +
+      prefix + "#movie_player.ad-interrupting::after,\n" +
+      "html[" + ROOT_AD_ACTIVE + "='1']:not([" + ROOT_DISABLED + "='1']) #movie_player::after {\n" +
+      "  content: '' !important; position: absolute !important; inset: 0 !important;\n" +
+      "  z-index: 2147483646 !important; background: #000 !important;\n" +
+      "  pointer-events: none !important; display: block !important;\n" +
+      "}\n" +
+      prefix + "ytd-rich-item-renderer:has(ytd-ad-slot-renderer),\n" +
+      prefix + "ytd-item-section-renderer:has(ytd-in-feed-ad-layout-renderer) {\n" +
+      "  display: none !important;\n" +
+      "}";
+
+    (document.head || document.documentElement).appendChild(style);
+  }
+
+  function isWhitelisted(hostname, list) {
+    if (!hostname || !Array.isArray(list)) return false;
+    var parts = hostname.toLowerCase().split(".");
+    for (var i = 0; i < parts.length - 1; i++) {
+      if (list.indexOf(parts.slice(i).join(".")) !== -1) return true;
+    }
+    return false;
+  }
+
+  function applySettings(settings) {
+    settings = settings || {};
+    enabled = settings.adBlock !== false && settings.ytSkip !== false &&
+              !isWhitelisted(window.location.hostname, settings.whitelist || []);
+
+    var docRoot = root();
+    if (!docRoot) return;
+    if (enabled) {
+      docRoot.removeAttribute(ROOT_DISABLED);
+      schedule();
+    } else {
+      docRoot.setAttribute(ROOT_DISABLED, "1");
+      finishAd();
     }
   }
 
-  function killAd() {
-    dismissEnforcementDialog();
+  function loadSettings() {
+    try {
+      chrome.storage.local.get(["adBlock", "ytSkip", "whitelist"], applySettings);
+      chrome.storage.onChanged.addListener(function () {
+        chrome.storage.local.get(["adBlock", "ytSkip", "whitelist"], applySettings);
+      });
+    } catch (_) {
+      applySettings({});
+    }
+  }
 
-    var player = document.querySelector(".html5-video-player");
-    if (!player) return;
+  function findPlayer() {
+    return document.getElementById("movie_player") ||
+           document.querySelector(".html5-video-player");
+  }
 
-    var isAdShowing = player.classList.contains("ad-showing") || player.classList.contains("ad-interrupting");
-    var isOverlayCard = Boolean(document.querySelector(".ytp-ad-player-overlay, .ytp-ad-player-overlay-layout"));
+  function playerIsShowingAd(candidate) {
+    if (!candidate) return false;
+    try {
+      if (candidate.classList.contains("ad-showing") ||
+          candidate.classList.contains("ad-interrupting")) return true;
+      if (typeof candidate.getAdState === "function" && candidate.getAdState() > 0) return true;
+    } catch (_) {}
+    return false;
+  }
 
-    if (isAdShowing || isOverlayCard) {
-      // 1. Click explicit ad skip button only if present
-      var skipBtns = document.querySelectorAll(AD_SKIP_BUTTONS);
-      for (var i = 0; i < skipBtns.length; i++) {
-        var btn = skipBtns[i];
-        if (btn && (btn.offsetParent !== null || btn.getClientRects().length > 0)) {
-          try {
-            btn.click();
-          } catch (_) {}
-        }
+  function bindPlayer(candidate) {
+    if (candidate === player) return;
+    if (playerObserver) playerObserver.disconnect();
+    player = candidate;
+
+    if (player && typeof MutationObserver === "function") {
+      playerObserver = new MutationObserver(schedule);
+      playerObserver.observe(player, {
+        attributes: true,
+        attributeFilter: ["class"],
+        childList: true,
+        subtree: true
+      });
+    }
+  }
+
+  function rememberVideo(video) {
+    if (!video || video === lastVideo) return;
+    lastVideo = video;
+    previousMuted = Boolean(video.muted);
+    videoWasPlaying = !video.paused;
+  }
+
+  function clickHiddenSkipControls(candidate) {
+    try {
+      if (typeof candidate.skipAd === "function") candidate.skipAd();
+    } catch (_) {}
+
+    var buttons = document.querySelectorAll(SKIP_SELECTORS);
+    for (var i = 0; i < buttons.length; i++) {
+      try { buttons[i].click(); } catch (_) {}
+    }
+  }
+
+  function instantEndAd(candidate) {
+    var video = candidate.querySelector("video.html5-main-video, video.video-stream") ||
+                document.querySelector("video.html5-main-video, video.video-stream");
+    if (!video) return;
+
+    rememberVideo(video);
+    try { video.muted = true; } catch (_) {}
+
+    // This is a zero-seek fallback, not playback acceleration. Normally the
+    // response sanitizer prevents this path from being needed at all.
+    try {
+      if (isFinite(video.duration) && video.duration > 0 &&
+          video.currentTime < video.duration - 0.02) {
+        video.currentTime = video.duration;
       }
+    } catch (_) {}
+  }
 
-      // 2. Poisoned Execution: Instant finish ad stream (ONLY when player is in explicit ad-showing mode)
-      if (isAdShowing) {
-        var video = player.querySelector("video.html5-main-video, video.video-stream") || document.querySelector("video");
-        if (video) {
-          try {
-            video.muted = true;
-            video.playbackRate = 16;
-            if (isFinite(video.duration) && video.duration > 0) {
-              video.currentTime = video.duration + 0.5;
-            }
-          } catch (_) {}
-        }
-      }
-    } else {
-      // 3. Ensure normal playback rate on normal user video
-      var normalVideo = player.querySelector("video.html5-main-video, video.video-stream") || document.querySelector("video");
-      if (normalVideo && normalVideo.playbackRate > 2) {
-        normalVideo.playbackRate = 1.0;
-        normalVideo.muted = false;
+  function finishAd() {
+    var docRoot = root();
+    if (docRoot) docRoot.removeAttribute(ROOT_AD_ACTIVE);
+
+    if (lastVideo) {
+      try { lastVideo.muted = previousMuted; } catch (_) {}
+      if (videoWasPlaying && lastVideo.paused) {
+        try {
+          var playPromise = lastVideo.play();
+          if (playPromise && typeof playPromise.catch === "function") {
+            playPromise.catch(function () {});
+          }
+        } catch (_) {}
       }
     }
+
+    lastVideo = null;
+    videoWasPlaying = false;
+  }
+
+  function scheduleBurst() {
+    if (burstId || typeof requestAnimationFrame !== "function") return;
+    burstFrames = 0;
+
+    var tick = function () {
+      burstId = 0;
+      if (!enabled || !playerIsShowingAd(player) || burstFrames++ >= 30) {
+        if (!playerIsShowingAd(player)) finishAd();
+        return;
+      }
+
+      suppressCurrentAd(false);
+      burstId = requestAnimationFrame(tick);
+    };
+
+    burstId = requestAnimationFrame(tick);
+  }
+
+  function suppressCurrentAd(startBurst) {
+    if (!enabled) return;
+
+    var current = findPlayer();
+    bindPlayer(current);
+    if (!current || !playerIsShowingAd(current)) {
+      finishAd();
+      return;
+    }
+
+    var docRoot = root();
+    if (docRoot) docRoot.setAttribute(ROOT_AD_ACTIVE, "1");
+    clickHiddenSkipControls(current);
+    instantEndAd(current);
+
+    if (startBurst !== false) scheduleBurst();
+  }
+
+  function schedule() {
+    if (queued) return;
+    queued = true;
+
+    var run = function () {
+      queued = false;
+      suppressCurrentAd(true);
+    };
+
+    if (typeof queueMicrotask === "function") queueMicrotask(run);
+    else Promise.resolve().then(run);
   }
 
   function start() {
-    injectCss();
-    killAd();
+    installCss();
+    loadSettings();
+    bindPlayer(findPlayer());
+    schedule();
 
-    setInterval(function () {
-      if (document.visibilityState === "hidden") return;
-      killAd();
-    }, 50);
+    if (typeof MutationObserver === "function") {
+      var documentObserver = new MutationObserver(schedule);
+      documentObserver.observe(document.documentElement, { childList: true, subtree: true });
+    }
 
-    var obs = new MutationObserver(function () {
-      injectCss();
-      killAd();
+    ["yt-navigate-start", "yt-navigate-finish", "yt-page-data-updated"].forEach(function (name) {
+      window.addEventListener(name, schedule, true);
     });
-    obs.observe(document.documentElement, { childList: true, subtree: true });
 
-    window.addEventListener("yt-navigate-finish", function () {
-      injectCss();
-      killAd();
-      setTimeout(function () {
-        var player = document.getElementById("movie_player") || document.querySelector(".html5-video-player");
-        if (player && typeof player.getPlayerState === "function" && player.getPlayerState() === -1) {
-          if (typeof player.playVideo === "function") {
-            player.playVideo();
-          }
-        }
-      }, 100);
+    ["loadedmetadata", "durationchange", "playing"].forEach(function (name) {
+      document.addEventListener(name, function (event) {
+        if (event.target && event.target.tagName === "VIDEO") schedule();
+      }, true);
     });
   }
 
   if (document.documentElement) start();
-  else document.addEventListener("DOMContentLoaded", start);
+  else document.addEventListener("DOMContentLoaded", start, { once: true });
 })();

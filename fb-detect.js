@@ -302,12 +302,24 @@
 
   /** Convenience: visible text of an element, already normalized. */
   function readLabel(el, env) {
+    if (!el) return "";
+
+    var raw = el.textContent || "";
+    var hasSvgUse = false;
+    if (el.querySelector && el.querySelector("use")) {
+      hasSvgUse = true;
+    }
+
+    var aria = el.getAttribute ? (el.getAttribute("aria-label") || el.getAttribute("title") || el.getAttribute("data-content")) : null;
+
+    if (!raw.trim() && !hasSvgUse && !aria) return "";
+
     var txt = visibleText(el, env);
 
     // SVG <use xlink:href="#SvgId"> resolution
     // Facebook live obfuscation technique (Aug 2026): Facebook renders "Sponsored" labels
     // using inline SVG <use> tags referencing <text id="..."> elements in root <defs>.
-    if (el) {
+    if (hasSvgUse) {
       try {
         var uses = el.querySelectorAll ? el.querySelectorAll("use") : [];
         if (uses && uses.length > 0) {
@@ -333,12 +345,7 @@
     if (txt) return norm(txt);
 
     // Fallback: check aria-label, title, or data-content if visibleText is empty
-    if (el) {
-      try {
-        var aria = el.getAttribute ? (el.getAttribute("aria-label") || el.getAttribute("title") || el.getAttribute("data-content")) : null;
-        if (aria) return norm(aria);
-      } catch (_) {}
-    }
+    if (aria) return norm(aria);
     return "";
   }
 
