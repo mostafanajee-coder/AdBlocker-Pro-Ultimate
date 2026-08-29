@@ -1,6 +1,6 @@
 {
   "name": "ad-blocker-pro",
-  "version": "4.3.0",
+  "version": "4.3.1",
   "private": true,
   "description": "Ultra-fast Manifest V3 ad blocker: Core community filter lists, Facebook and Instagram sponsored-post detection, zero-play YouTube response sanitizing, and Popunder neutralization.",
   "scripts": {

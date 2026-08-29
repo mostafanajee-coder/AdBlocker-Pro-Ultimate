@@ -161,6 +161,35 @@ section("6. Must NOT match");
     "Admin",
     "Address",
     "Add account",
+    "إعلان مهم للجميع",
+    "برعاية الشيخ محمد",
+    "برعاية وزارة الصحة",
+    "ممول من الجهة",
+    "Commercial break",
+    "Paid in full",
+    "إعلان 2026",
+    "إعلان 1445",
+    "Sponsored 5workshops",
+    // A timestamp always carries a UNIT. A bare number never does, in any
+    // digit script -- these all read as ordinary Arabic post openers.
+    "اعلان ٢٠٢٦",        // Arabic-Indic year
+    "إعلان ١٤٤٧",        // Arabic-Indic Hijri year
+    "إعلان ٢٠٢٥",
+    "إعلان 2026م",       // Gregorian year + Arabic era suffix
+    "اعلان ١٤٤٧هـ",      // Hijri year + era suffix
+    "إعلان 3",           // bare number, no unit
+    "إعلان 12",
+    "Ad 5pm",            // "pm" is not a duration unit
+    "إعلان 7up",
+    // A label followed by prose in a script that is neither Latin nor Arabic.
+    // The old "symbol-only remainder" test negated an ASCII+Arabic character
+    // class, so every one of these read as punctuation and was hidden.
+    "Реклама на телевидении",
+    "Реклама это искусство",
+    "広告について話しましょう",
+    "스폰서 여러분 안녕하세요",
+    "ממומן על ידי חברה",
+    "प्रायोजित कार्यक्रम",
     ""
   ];
 
@@ -172,7 +201,7 @@ section("6. Must NOT match");
 }
 
 /* ==========================================================================
- * 7. Label followed by a timestamp — real posts look like this
+ * 7. Label followed by a timestamp / sub-disclosure — real posts look like this
  * ======================================================================== */
 
 section("7. Label with trailing separator / timestamp");
@@ -188,6 +217,31 @@ section("7. Label with trailing separator / timestamp");
 
   const d = el("span").append(txt("إعلان · ٣ س", 100, 50, 60, 12));
   check("'إعلان · ٣ س' matches", D.matchesAny(D.readLabel(d, env), D.SPONSORED), true);
+
+  const e = el("span").append(txt("Sponsored · Paid partnership with Nike", 100, 50, 180, 12));
+  check("'Sponsored · Paid partnership with Nike' matches", D.matchesAny(D.readLabel(e, env), D.SPONSORED), true);
+
+  // Every unit form a real chip can carry must survive the bare-number rule.
+  // Attached ("3h") and space-separated ("٥ س") are both legal.
+  const units = [
+    "Sponsored · 2d", "Sponsored · 1w", "Sponsored · 45m", "Sponsored · 12h",
+    "Sponsored · 3 hrs", "Sponsored · 6 days",
+    "مُموَّل · ١٥ س", "مُموَّل · ٣ ش", "مُموَّل · ٧ د", "مُموَّل · ٢ يوم",
+    "إعلان · ٤ ساعات"
+  ];
+  for (const u of units) {
+    const s = el("span").append(txt(u, 100, 50, u.length * 7, 12));
+    check(`unit form matches: ${JSON.stringify(u)}`,
+          D.matchesAny(D.readLabel(s, env), D.SPONSORED), true);
+  }
+
+  // Dropping the symbol-only branch must not cost us the bare labels
+  // themselves in those same scripts.
+  for (const bare of ["Реклама", "広告", "스폰서", "ממומן", "प्रायोजित", "Gesponsert"]) {
+    const s = el("span").append(txt(bare, 100, 50, bare.length * 9, 12));
+    check(`bare non-Latin label matches: ${JSON.stringify(bare)}`,
+          D.matchesAny(D.readLabel(s, env), D.SPONSORED), true);
+  }
 }
 
 /* ==========================================================================

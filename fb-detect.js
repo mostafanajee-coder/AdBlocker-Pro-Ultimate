@@ -65,9 +65,9 @@
   }
 
   var SPONSORED = normList([
-    "Sponsored", "Sponsored Post", "Ad", "Ads", "Promoted", "Paid", "Commercial",
+    "Sponsored", "Sponsored Post", "Ad", "Promoted",
     "مُموَّل", "ممول", "مموّل", "برعاية", "بِرعاية",
-    "إعلان", "اعلان", "إعلانات", "اعلانات",
+    "إعلان", "اعلان",
     "إعلان مُموَّل", "منشور مُموَّل", "محتوى مُموَّل",
     "إعلان مدفوع", "اعلان مدفوع", "إعلان ترويجي", "اعلان ترويجي",
     "منشور إعلاني", "محتوى إعلاني",
@@ -87,7 +87,78 @@
     "Vorgeschlagen für dich", "Sizin için önerilen", "Disarankan untuk Anda"
   ]);
 
-  /** Exact match, or the label followed by a short separator/timestamp. */
+  /* ---------------------------------------------------------------- *
+   * Timestamp recognition                                             *
+   *                                                                   *
+   * A chip's trailing text is a TIMESTAMP, and a timestamp always      *
+   * carries a unit: "3h", "٥ س", "2d". A bare number does not, which   *
+   * is what separates the real chip "Sponsored · 3h" from the ordinary *
+   * Arabic post opener "إعلان 2026".                                   *
+   * ---------------------------------------------------------------- */
+
+  /* Digit ranges: ASCII, Arabic-Indic (U+0660-0669), Extended Arabic-Indic
+   * (U+06F0-06F9).
+   *
+   * The LETTER class below deliberately excludes those two digit ranges. A
+   * class of ؀-ۿ contains them, which made "٢٠٢٦" parse as one
+   * digit followed by three "letters" — so an Arabic-Indic year read as a
+   * timestamp and organic posts were hidden. Latin years were rejected by a
+   * separate ASCII-only guard; Arabic ones never reached it. */
+  var RE_NUM_ONLY = /^[0-9٠-٩۰-۹]+$/;
+  var RE_NUM_UNIT = /^[0-9٠-٩۰-۹]+([a-zA-Zء-يٱ-ۓ]{1,8})$/;
+
+  /* There is deliberately NO "symbol-only remainder" test here.
+   *
+   * norm() already collapses everything that is not a letter, a digit or a
+   * space into spaces and trims, so a remainder made only of punctuation or
+   * icons arrives as "" and is caught by the `if (!rest) return true;` above.
+   *
+   * The test that used to live here negated an ASCII+Arabic character class.
+   * Cyrillic, CJK, Hebrew and Devanagari all fall outside such a class, so
+   * "Реклама на телевидении" and "広告 テスト" read as "symbol-only" and
+   * organic posts in those locales were hidden -- the same defect as the
+   * Arabic year bug, in six more languages. */
+
+  /* Units a real Facebook timestamp can carry, in NORMALIZED form — norm()
+   * lowercases, maps ة->ه / ى->ي / أإآٱ->ا and strips diacritics and tatweel.
+   * Bare alef is deliberately NOT listed as a week abbreviation: a single
+   * letter that common words begin with is far too collision-prone. */
+  var TIME_UNITS = {};
+  (function (units) {
+    for (var i = 0; i < units.length; i++) TIME_UNITS[units[i]] = 1;
+  })([
+    "s", "sec", "secs", "second", "seconds",
+    "m", "min", "mins", "minute", "minutes",
+    "h", "hr", "hrs", "hour", "hours",
+    "d", "day", "days",
+    "w", "wk", "wks", "week", "weeks",
+    "mo", "mos", "month", "months",
+    "y", "yr", "yrs", "year", "years",
+    "ث", "ثانيه", "ثانيتين", "ثوان", "ثواني",
+    "د", "دق", "دقيقه", "دقيقتين", "دقائق",
+    "س", "سا", "ساعه", "ساعتين", "ساعات",
+    "ي", "يوم", "يومين", "ايام",
+    "اسبوع", "اسبوعين", "اسابيع",
+    "ش", "شهر", "شهرين", "اشهر", "شهور",
+    "سنه", "سنتين", "سنوات"
+  ]);
+
+  /** Does the remainder after a label read as a timestamp?
+   *  The unit may be attached ("3h") or a separate token ("٥ س"). */
+  function isTimestamp(rest) {
+    var tokens = rest.split(/\s+/);
+    var first = tokens[0];
+
+    var attached = RE_NUM_UNIT.exec(first);
+    if (attached) return TIME_UNITS[attached[1]] === 1;
+
+    if (RE_NUM_ONLY.test(first)) {
+      return tokens.length > 1 && TIME_UNITS[tokens[1]] === 1;
+    }
+    return false;
+  }
+
+  /** Exact match, or the label followed by a timestamp / known sub-disclosure. */
   function matchesAny(text, list) {
     if (!text) return false;
     for (var i = 0; i < list.length; i++) {
@@ -99,14 +170,27 @@
         if (nextChar && /[a-zA-Z0-9\u0600-\u06FF]/i.test(nextChar)) continue;
 
         var rest = text.slice(l.length).trim();
-        if (l.length <= 3) {
-          if (!rest) return true;
-          // For short labels like "ad" or "ads", rest must be a separator or timestamp/icon (not words like "center" or "manager")
-          if (/^[^a-z0-9]/i.test(rest) || /^(\d+[hmds]|🌐)/i.test(rest)) return true;
-          continue;
-        }
+        if (!rest) return true;
 
-        if (text.length <= l.length + 12) return true;
+        // 1. A timestamp: a number carrying a UNIT, attached ("3h") or
+        //    separate ("٥ س"). A BARE number is rejected in every digit
+        //    script -- "إعلان 2026" and "إعلان ١٤٤٧" are ordinary Arabic
+        //    post openers, not disclosure chips.
+        if (isTimestamp(rest)) return true;
+
+        // 2. Check if the remainder is another recognized disclosure token (e.g. "Paid partnership with X")
+        var isSubDisclosure = false;
+        for (var k = 0; k < list.length; k++) {
+          var sub = list[k];
+          if (sub.length > 3 && (rest === sub || rest.indexOf(sub + " ") === 0)) {
+            isSubDisclosure = true;
+            break;
+          }
+        }
+        if (isSubDisclosure) return true;
+
+        // Any arbitrary prose words ("مهم للجميع", "الشيخ محمد", "2026", "break", "in full") are rejected.
+        continue;
       }
     }
     return false;
