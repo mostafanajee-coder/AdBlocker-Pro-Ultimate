@@ -400,9 +400,28 @@
 
     var txt = visibleText(el, env);
 
+    function resolveSvgTargetText(targetEl, doc, depth) {
+      if (!targetEl || depth > 8) return "";
+      var directText = (targetEl.textContent || targetEl.innerText || "").trim();
+      var nestedUse = targetEl.querySelector ? targetEl.querySelector("use") : null;
+      if (!nestedUse && directText) return directText;
+      if (nestedUse) {
+        var nhref = nestedUse.getAttribute ? (nestedUse.getAttribute("xlink:href") || nestedUse.getAttribute("href")) : null;
+        if (nhref && nhref.charAt(0) === "#") {
+          var nDoc = doc || document;
+          var nTarget = nDoc.getElementById ? nDoc.getElementById(nhref.slice(1)) : null;
+          if (nTarget && nTarget !== targetEl) {
+            var res = resolveSvgTargetText(nTarget, nDoc, depth + 1);
+            if (res) return res;
+          }
+        }
+      }
+      return directText;
+    }
+
     // SVG <use xlink:href="#SvgId"> resolution
-    // Facebook live obfuscation technique (Aug 2026): Facebook renders "Sponsored" labels
-    // using inline SVG <use> tags referencing <text id="..."> elements in root <defs>.
+    // Facebook live obfuscation technique (Aug 2026): Facebook renders "Sponsored" / "Ad" labels
+    // using inline SVG <use> tags referencing multi-level nested <use> elements in root <defs>.
     if (hasSvgUse) {
       try {
         var uses = el.querySelectorAll ? el.querySelectorAll("use") : [];
@@ -416,7 +435,7 @@
               var doc = (env && env.doc) || (el.ownerDocument || document);
               var targetEl = doc.getElementById ? doc.getElementById(targetId) : null;
               if (targetEl) {
-                var tContent = targetEl.textContent || targetEl.innerText || "";
+                var tContent = resolveSvgTargetText(targetEl, doc, 0);
                 if (tContent) svgText += " " + tContent;
               }
             }

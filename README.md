@@ -1,7 +1,7 @@
 # 🛡️ Ad Blocker Pro Ultimate (v5.0.0)
 
 [![Manifest V3](https://img.shields.io/badge/Chrome-Manifest%20V3-blue.svg)](https://developer.chrome.com/docs/extensions/mv3/intro/)
-[![Tests](https://img.shields.io/badge/Tests-172%2F172%20Passing-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/Tests-176%2F176%20Passing-brightgreen.svg)](tests/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Speed](https://img.shields.io/badge/Performance-Zero--Overhead-orange.svg)](#)
 
@@ -128,26 +128,26 @@ Movie and anime streaming platforms deploy transparent overlays (`div[style*="z-
 
 ## 🧪 Automated Testing
 
-Ad Blocker Pro Ultimate includes a 172-test automated unit testing suite simulating complex DOM layouts, clipped decoys, and bidirectional font rendering:
+Ad Blocker Pro Ultimate includes a 176-test automated unit testing suite simulating complex DOM layouts, clipped decoys, multi-level nested SVG references, and bidirectional font rendering:
 
 ```bash
 npm test
 ```
 
 ### Test Coverage Summary:
-* ✅ **Facebook Detection (100 tests)**: Coordinate bounding boxes, multi-line labels, trailing timestamps, zero-width obfuscation, decoy clipping.
+* ✅ **Facebook Detection (104 tests)**: Multi-level nested SVG chains (`Ad`, `Sponsored`, `مُموَّل`), visual coordinate bounding boxes, zero-width joiner obfuscation, decoy clipping.
 * ✅ **YouTube Sanitizer (31 tests)**: `adPlacements` and `playerAds` stripping, feed & Shorts ad removal, XSSI prefix preservation, circular reference protection.
 * ✅ **Instagram Module (13 tests)**: Multi-lingual sponsored tokens, zero-width joiner extraction, non-ad label rejection.
 * ✅ **Twitter / X Module (28 tests)**: Exact official tokens (`الإعلان`, `مُروّج`, `Promoted`, `Ad`), `twclid` attribution links, tweet body isolation, zero false positives.
 
 ```text
 ================================================================
-  Facebook Detection: 100 passed, 0 failed
+  Facebook Detection: 104 passed, 0 failed
   YouTube Sanitizer:   31 passed, 0 failed
   Instagram Module:    13 passed, 0 failed
   Twitter / X Module:  28 passed, 0 failed
 ================================================================
-  Total: 172 passed, 0 failed (100% Success)
+  Total: 176 passed, 0 failed (100% Success)
 ```
 
 ---

@@ -407,6 +407,40 @@ section("12. SVG <use> label obfuscation");
 
   check("resolves SVG <use> referenced target text", D.readLabel(labelWrapper, envSvg), "sponsored");
   check("SVG <use> label matches SPONSORED", D.matchesAny(D.readLabel(labelWrapper, envSvg), D.SPONSORED), true);
+
+  // 4-level nested SVG chain (Live Facebook Comet 2026 pattern: Svg1 -> Svg2 -> Svg3 -> Svg4)
+  const targetText4 = el("text", {}, { id: "SvgWml4" }).append(hiddenTxt("Ad"));
+  const targetSvg3 = el("svg", {}, { id: "SvgWml3" }).append(el("use", {}, { "xlink:href": "#SvgWml4" }));
+  const targetSvg2 = el("svg", {}, { id: "SvgWml2" }).append(el("use", {}, { "xlink:href": "#SvgWml3" }));
+  const targetSvg1 = el("svg", {}, { id: "SvgWml1" }).append(el("use", {}, { "xlink:href": "#SvgWml2" }));
+
+  const envNested = makeEnv({
+    SvgWml4: targetText4,
+    SvgWml3: targetSvg3,
+    SvgWml2: targetSvg2,
+    SvgWml1: targetSvg1
+  });
+
+  const rootUse = el("use", {}, { "xlink:href": "#SvgWml1" });
+  const rootSvg = el("svg").append(rootUse);
+  const rootSpan = el("span").append(rootSvg);
+
+  check("resolves 4-level nested SVG <use> chain (Live FB 2026)", D.readLabel(rootSpan, envNested), "ad");
+  check("4-level nested SVG matches SPONSORED", D.matchesAny(D.readLabel(rootSpan, envNested), D.SPONSORED), true);
+
+  // Arabic nested SVG chain ("مُموَّل")
+  const targetArabic = el("text", {}, { id: "SvgAr2" }).append(hiddenTxt("مُموَّل"));
+  const targetArabicSvg1 = el("svg", {}, { id: "SvgAr1" }).append(el("use", {}, { "xlink:href": "#SvgAr2" }));
+  const envArabicSvg = makeEnv({
+    SvgAr2: targetArabic,
+    SvgAr1: targetArabicSvg1
+  });
+  const rootArUse = el("use", {}, { "xlink:href": "#SvgAr1" });
+  const rootArSvg = el("svg").append(rootArUse);
+  const rootArSpan = el("span").append(rootArSvg);
+
+  check("resolves Arabic nested SVG <use> chain", D.readLabel(rootArSpan, envArabicSvg), "ممول");
+  check("Arabic nested SVG matches SPONSORED", D.matchesAny(D.readLabel(rootArSpan, envArabicSvg), D.SPONSORED), true);
 }
 
 /* ==========================================================================

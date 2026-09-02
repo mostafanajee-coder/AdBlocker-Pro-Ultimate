@@ -416,6 +416,22 @@
     }
   }
 
+  /** Dedicated sweeper for SVG <use> based ad disclosure chips */
+  function sweepSvgAds() {
+    if (!S.adBlock || !S.fbSponsored) return;
+    var uses = document.querySelectorAll('svg use[*|href^="#"], svg use[href^="#"]');
+    for (var i = 0; i < uses.length && i < 40; i++) {
+      var u = uses[i];
+      var label = D.readLabel(u.parentElement || u, ENV);
+      if (label && matchesAny(label, SPONSORED)) {
+        var card = postContainerOf(u);
+        if (card && !card.__abpHidden) {
+          hide(card, "sponsored-svg");
+        }
+      }
+    }
+  }
+
   function sweepLabels() {
     if (!S.adBlock) return;
     if (!S.fbSponsored && !S.fbSuggested) return;
@@ -564,6 +580,7 @@
   function sweep() {
     pending = false;
     try { sweepDirectAdLinks(); } catch (_) {}
+    try { sweepSvgAds(); } catch (_) {}
     try { sweepLabels(); } catch (_) {}
     try { sweepReels(); } catch (_) {}
     try { sweepReelAds(); } catch (_) {}
