@@ -101,7 +101,7 @@
 
   function postContainerOf(el) {
     if (!el) return null;
-    if (el.closest && el.closest('[role="navigation"], nav, header')) return null;
+    if (el.closest && (el.closest('[role="navigation"], nav, header') || el.closest('[style*="-10000"]'))) return null;
 
     // 1. Direct semantic container match if available
     var directCard = el.closest('div[role="article"], div[data-pagelet*="FeedUnit"], div[role="feed"] > div');
@@ -119,7 +119,9 @@
       n = n.parentElement;
       if (!n || n.tagName === "BODY" || n.tagName === "HTML") break;
       if (n.getAttribute && (n.getAttribute("role") === "navigation" || n.getAttribute("role") === "main" || n.getAttribute("role") === "feed" || n.tagName === "NAV" || n.tagName === "HEADER")) break;
+      if (n.getAttribute && n.getAttribute("style") && n.getAttribute("style").indexOf("-10000") !== -1) break;
       var r = n.getBoundingClientRect();
+      if (r.bottom < -500 || r.top < -5000) break; // Off-screen definitions pool (-10000px) is NEVER a post card
       if (r.width > maxW || r.height > 2600) break;
       if (r.width >= COLUMN_MIN && r.height >= POST_MIN_H) {
         best = n; // Outermost valid container bounded by hard ceilings
@@ -419,16 +421,45 @@
   /** Dedicated sweeper for SVG <use> based ad disclosure chips */
   function sweepSvgAds() {
     if (!S.adBlock || !S.fbSponsored) return;
-    var uses = document.querySelectorAll('svg use[*|href^="#"], svg use[href^="#"]');
+    var main = document.querySelector('div[role="main"]') || document.body;
+    var uses = main.querySelectorAll('svg use[*|href^="#"], svg use[href^="#"]');
     for (var i = 0; i < uses.length && i < 40; i++) {
       var u = uses[i];
+      if (u.closest && u.closest('[style*="-10000"]')) continue;
+      var card = postContainerOf(u);
+      if (!card || card.__abpHidden) continue;
+      var cr = card.getBoundingClientRect();
+      if (cr.bottom < -500 || cr.top < -5000) continue;
+
       var label = D.readLabel(u.parentElement || u, ENV);
       if (label && matchesAny(label, SPONSORED)) {
-        var card = postContainerOf(u);
-        if (card && !card.__abpHidden) {
-          hide(card, "sponsored-svg");
-        }
+        hide(card, "sponsored-svg");
       }
+    }
+  }
+
+  /**
+   * Facebook Comet 2026 Obfuscation Guard:
+   * Facebook often renders post timestamps into root SVG <text> elements with textLength="0" and y="-3",
+   * and referencing <svg> with height: 1px, causing timestamps to shrink into invisible 0-width dots.
+   * This restores normal visual dimensions for all organic timestamps (Arabic & English).
+   */
+  function restoreSvgTimestamps() {
+    var texts = document.querySelectorAll('text[textLength="0"], text[y="-3"]');
+    for (var i = 0; i < texts.length; i++) {
+      var t = texts[i];
+      var raw = (t.textContent || "").trim();
+      if (!raw) continue;
+      var normTxt = D.norm(raw);
+      if (matchesAny(normTxt, SPONSORED)) continue;
+
+      t.removeAttribute("textLength");
+      t.setAttribute("y", "12");
+    }
+
+    var svgs = document.querySelectorAll('div[role="main"] a svg[style*="height: 1px"]');
+    for (var s = 0; s < svgs.length; s++) {
+      svgs[s].style.setProperty("height", "14px", "important");
     }
   }
 
@@ -581,6 +612,7 @@
     pending = false;
     try { sweepDirectAdLinks(); } catch (_) {}
     try { sweepSvgAds(); } catch (_) {}
+    try { restoreSvgTimestamps(); } catch (_) {}
     try { sweepLabels(); } catch (_) {}
     try { sweepReels(); } catch (_) {}
     try { sweepReelAds(); } catch (_) {}
