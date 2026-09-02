@@ -1,7 +1,7 @@
 # 🛡️ Ad Blocker Pro Ultimate (v5.0.0)
 
 [![Manifest V3](https://img.shields.io/badge/Chrome-Manifest%20V3-blue.svg)](https://developer.chrome.com/docs/extensions/mv3/intro/)
-[![Tests](https://img.shields.io/badge/Tests-160%2F160%20Passing-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/Tests-172%2F172%20Passing-brightgreen.svg)](tests/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Speed](https://img.shields.io/badge/Performance-Zero--Overhead-orange.svg)](#)
 
