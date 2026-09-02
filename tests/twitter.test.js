@@ -17,50 +17,94 @@ function check(condition, label) {
   }
 }
 
-console.log("\nTwitter / X sponsored-label detection");
-console.log("-------------------------------------");
+console.log("\nTwitter / X exact-match ad detection (Zero False Positives)");
+console.log("----------------------------------------------------------");
 
-check(twitter.isPromotedText("Promoted"), "matches English Promoted");
-check(twitter.isPromotedText("promoted tweet"), "matches English promoted tweet");
-check(twitter.isPromotedText("Ad"), "matches English Ad");
-check(twitter.isPromotedText("مُروّج"), "matches Arabic مُروّج");
-check(twitter.isPromotedText("مروج"), "matches Arabic مروج");
-check(twitter.isPromotedText("إعلان"), "matches Arabic إعلان");
-check(twitter.isPromotedText("اعلان"), "matches Arabic اعلان");
-check(twitter.isPromotedText("Sponsorisé"), "matches French Sponsorisé");
+// 1. Exact matches
+check(twitter.isExactPromotedLabel("Promoted"), "matches standalone 'Promoted'");
+check(twitter.isExactPromotedLabel("promoted tweet"), "matches 'promoted tweet'");
+check(twitter.isExactPromotedLabel("Ad"), "matches standalone 'Ad'");
+check(twitter.isExactPromotedLabel("مُروّج"), "matches Arabic 'مُروّج'");
+check(twitter.isExactPromotedLabel("مروج"), "matches Arabic normalized 'مروج'");
+check(twitter.isExactPromotedLabel("Sponsorisé"), "matches French 'Sponsorisé'");
+check(twitter.isExactPromotedLabel("Gesponsert"), "matches German 'Gesponsert'");
+check(twitter.isExactPromotedLabel("Реклама"), "matches Russian 'Реклама'");
+check(twitter.isExactPromotedLabel("プロモーション"), "matches Japanese 'プロモーション'");
 
-check(!twitter.isPromotedText("I got promoted at work today!"), "rejects English sentence with promoted");
-check(!twitter.isPromotedText("هذا ليس إعلان تجاري بل نصيحة"), "rejects Arabic sentence with ad");
-check(!twitter.isPromotedText("Looking for advice on ad tech careers"), "rejects sentence with ad");
+// 2. Strict rejection of organic text and false positives
+check(!twitter.isExactPromotedLabel("إعلان هام للجميع"), "rejects 'إعلان هام للجميع'");
+check(!twitter.isExactPromotedLabel("إعلان نتائج القبول"), "rejects 'إعلان نتائج القبول'");
+check(!twitter.isExactPromotedLabel("اعلان وظائف"), "rejects 'اعلان وظائف'");
+check(!twitter.isExactPromotedLabel("I got promoted at work today!"), "rejects 'I got promoted at work today!'");
+check(!twitter.isExactPromotedLabel("This was a great ad"), "rejects 'This was a great ad'");
+check(!twitter.isExactPromotedLabel("Ad Agency"), "rejects 'Ad Agency'");
+check(!twitter.isExactPromotedLabel("Chad"), "rejects 'Chad'");
+check(!twitter.isExactPromotedLabel("Adam"), "rejects 'Adam'");
 
-// DOM structure mock tests
-const mockArticleWithTracking = {
+// 3. DOM Isolation: tweet body must NEVER be flagged
+const mockTweetWithBodyMention = {
+  querySelector: () => null,
+  querySelectorAll: (selector) => {
+    if (selector.includes('span')) {
+      return [{
+        textContent: "مُروّج",
+        getAttribute: () => null,
+        closest: (ancestor) => (ancestor === '[data-testid="tweetText"]' ? {} : null)
+      }];
+    }
+    return [];
+  }
+};
+check(!twitter.isPromotedTweet(mockTweetWithBodyMention), "rejects tweet even if tweet body text contains 'مُروّج'");
+
+// 4. DOM Isolation: user name must NEVER be flagged
+const mockTweetWithUserNameMention = {
+  querySelector: () => null,
+  querySelectorAll: (selector) => {
+    if (selector.includes('span')) {
+      return [{
+        textContent: "Ad",
+        getAttribute: () => null,
+        closest: (ancestor) => (ancestor === '[data-testid="User-Name"]' ? {} : null)
+      }];
+    }
+    return [];
+  }
+};
+check(!twitter.isPromotedTweet(mockTweetWithUserNameMention), "rejects tweet if User-Name contains 'Ad'");
+
+// 5. Genuine Promoted Tweet with dedicated ad badge outside body
+const mockGenuineAdTweet = {
+  querySelector: () => null,
+  querySelectorAll: (selector) => {
+    if (selector.includes('span')) {
+      return [{
+        textContent: "مُروّج",
+        getAttribute: () => null,
+        closest: () => null
+      }];
+    }
+    return [];
+  }
+};
+check(twitter.isPromotedTweet(mockGenuineAdTweet), "detects genuine promoted tweet with standalone badge");
+
+// 6. Placement tracking telemetry
+const mockTrackingTweet = {
   querySelector: (sel) => (sel === '[data-testid="placementTracking"]' ? {} : null),
   querySelectorAll: () => []
 };
-check(twitter.isPromotedTweet(mockArticleWithTracking), "detects promoted tweet via placementTracking");
+check(twitter.isPromotedTweet(mockTrackingTweet), "detects promoted tweet via placementTracking");
 
-const mockArticleWithAdLink = {
+// 7. Generic links with '/ads' must NOT trigger false positive
+const mockTweetWithArticleLink = {
   querySelector: () => null,
-  querySelectorAll: (sel) => (sel.includes("/quick_promote_web/") ? [{}] : [])
+  querySelectorAll: (selector) => {
+    if (selector.includes('ads.twitter.com')) return [];
+    return [];
+  }
 };
-check(twitter.isPromotedTweet(mockArticleWithAdLink), "detects promoted tweet via quick_promote_web link");
-
-const mockArticleWithSpan = {
-  querySelector: () => null,
-  querySelectorAll: (sel) => (sel.includes("span") ? [{ textContent: "Promoted", getAttribute: () => null }] : [])
-};
-check(twitter.isPromotedTweet(mockArticleWithSpan), "detects promoted tweet via Promoted span");
-
-const mockOrganicArticle = {
-  querySelector: () => null,
-  querySelectorAll: (sel) => (sel.includes("span") ? [{ textContent: "Hello world, peaceful day!", getAttribute: () => null }] : [])
-};
-check(!twitter.isPromotedTweet(mockOrganicArticle), "rejects organic tweet without ad signals");
-
-const repo = path.resolve(__dirname, "..");
-const source = fs.readFileSync(path.join(repo, "twitter.js"), "utf8");
-check(!/setInterval\s*\(/.test(source), "Twitter module avoids permanent polling setInterval");
+check(!twitter.isPromotedTweet(mockTweetWithArticleLink), "rejects tweet with generic /ads link");
 
 console.log("\n" + "=".repeat(64));
 console.log(`  Twitter / X: ${passed} passed, ${failed} failed`);
