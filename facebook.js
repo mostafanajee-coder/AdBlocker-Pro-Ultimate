@@ -326,7 +326,7 @@
       if (seen.has(e) || e.__abpHidden) continue;
 
       // FAST PATH 1: Skip large structural elements immediately without layout reflow
-      if (e.childElementCount > 8) continue;
+      if (e.childElementCount > 35) continue;
 
       var raw = e.textContent || "";
       var aria = e.getAttribute ? e.getAttribute("aria-label") : null;
@@ -342,7 +342,7 @@
         }
 
         // FAST PATH 3: Text heuristic check (Skip non-matching text without getBoundingClientRect)
-        if (rawLen > 20 && !HINT.test(raw)) {
+        if (rawLen > 32 && !HINT.test(raw)) {
           seen.add(e);
           continue;
         }
@@ -405,8 +405,7 @@
   /** Direct fast sweeper for outbound ad redirect links and ad preferences */
   function sweepDirectAdLinks() {
     if (!S.adBlock || !S.fbSponsored) return;
-    // Removed l.facebook.com/l.php and generic /about/ads to protect legitimate links and Page About sections
-    var adLinks = document.querySelectorAll('a[href*="/ads/about"], a[href*="facebook.com/ads/about"], a[href*="/ad_preferences/"]');
+    var adLinks = document.querySelectorAll('a[href*="/ads/about"], a[href*="facebook.com/ads/about"], a[href*="/about/ads"], a[href*="facebook.com/about/ads"], a[href*="/about_this_ad"], a[href*="/ad_preferences/"], a[href*="facebook.com/ad_preferences"]');
     for (var i = 0; i < adLinks.length && i < 30; i++) {
       var card = postContainerOf(adLinks[i]);
       if (card && !card.__abpHidden) {
@@ -438,13 +437,14 @@
           lr.top    < cr.top    - 20 || lr.bottom > cr.bottom + 20) continue;
 
       // Header Band Constraint for Feed Cards:
-      // On Facebook Feed, the genuine disclosure chip ("مُموَّل" / "Sponsored") sits within the author/metadata header band (top <= 110px of the card).
+      // On Facebook Feed, the genuine disclosure chip ("مُموَّل" / "Sponsored") sits within the author/metadata header band.
+      // 240px allows full coverage for 2-line Arabic titles, badges, and margins without hitting the post body.
       var isReel = (window.location && window.location.pathname.indexOf("/reel") !== -1) ||
                    (container.closest && container.closest('[aria-label*="Reel" i], [aria-label*="ريلز" i], [data-pagelet*="Reel" i]'));
 
       if (!isReel) {
         var offsetFromCardTop = lr.top - cr.top;
-        if (offsetFromCardTop > 110) continue;
+        if (offsetFromCardTop > 240) continue;
       }
 
       hide(container, hit.kind);
@@ -644,6 +644,12 @@
 
     window.addEventListener("scroll", onScrollPassive, { passive: true, capture: true });
     window.addEventListener("wheel", onScrollPassive, { passive: true, capture: true });
+
+    // Periodic lightweight refresh for lazily hydrated GraphQL feed items
+    setInterval(function () {
+      seen = new WeakSet();
+      schedule(false);
+    }, 2500);
   }
 
   function boot() {

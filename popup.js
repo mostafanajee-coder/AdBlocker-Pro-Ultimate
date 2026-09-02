@@ -34,10 +34,13 @@
       manage: "إدارة",
       close: "إغلاق",
       add: "إضافة",
-      communityFilters: "قواعد الحجب المدمجة",
+      communityFilters: "قواعد التصفية المدمجة (DNR)",
       update: "تحديث",
-      updating: "جاري التحميل...",
-      builtStat: "300,000+ قاعدة شبكية مفعلة"
+      updating: "جاري التحديث...",
+      rulesActive: "قواعد مفعلة",
+      builtStat: "300,000+ قاعدة شبكية مفعلة",
+      zapperTitle: "انقر لاختيار وحجب أي عنصر في الصفحة",
+      whitelistTitle: "استثناء الموقع الحالي من الحجب"
     },
     en: {
       langBtn: "عربي",
@@ -71,7 +74,10 @@
       communityFilters: "Built-in DNR Rulesets",
       update: "Update",
       updating: "Updating...",
-      builtStat: "300,000+ active network rules"
+      rulesActive: "active rules",
+      builtStat: "300,000+ active network rules",
+      zapperTitle: "Click to select and hide any element",
+      whitelistTitle: "Whitelist current site from blocking"
     }
   };
 
@@ -106,6 +112,22 @@
         el.textContent = t[key];
       }
     });
+
+    var zapperBtn = document.getElementById("zapperBtn");
+    if (zapperBtn) zapperBtn.title = t.zapperTitle;
+
+    var wlBtn = document.getElementById("whitelistToggleBtn");
+    if (wlBtn) wlBtn.title = t.whitelistTitle;
+
+    var filterStatEl = document.getElementById("filterStat");
+    if (filterStatEl) {
+      var numMatch = filterStatEl.textContent.match(/[\d,]+/);
+      if (numMatch) {
+        filterStatEl.textContent = numMatch[0] + " " + t.rulesActive;
+      } else {
+        filterStatEl.textContent = t.builtStat;
+      }
+    }
 
     var input = document.getElementById("newDomainInput");
     if (input) {
@@ -288,7 +310,8 @@
           rebuildBtn.textContent = TRANSLATIONS[currentLang].update;
           var el = document.getElementById("filterStat");
           if (res && res.ok) {
-            el.textContent = (res.report && res.report.rules ? res.report.rules.toLocaleString() : "300,000+") + " قواعد مفعلة";
+            var countStr = res.report && res.report.rules ? res.report.rules.toLocaleString() : "300,000+";
+            el.textContent = countStr + " " + (TRANSLATIONS[currentLang].rulesActive || "active rules");
           }
         });
       });
