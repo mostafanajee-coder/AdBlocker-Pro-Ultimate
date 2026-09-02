@@ -15,6 +15,10 @@
     'ad',
     'مُروّج',
     'مروج',
+    'الإعلان',
+    'الاعلان',
+    'إعلان',
+    'اعلان',
     'sponsorisé',
     'sponsorise',
     'patrocinado',
@@ -44,8 +48,9 @@
   function isPromotedTweet(article) {
     if (!article) return false;
 
-    // 1. Official Twitter Ads Link (Strict domain matching, NEVER bare "/ads")
+    // 1. Official Twitter Ads Link & Click-Tracking (twclid)
     const adLinks = article.querySelectorAll(
+      'a[href*="twclid="], ' +
       'a[href*="ads.twitter.com"], ' +
       'a[href*="ads.x.com"], ' +
       'a[href*="/about-this-ad"], ' +

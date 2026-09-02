@@ -26,6 +26,10 @@ check(twitter.isExactPromotedLabel("promoted tweet"), "matches 'promoted tweet'"
 check(twitter.isExactPromotedLabel("Ad"), "matches standalone 'Ad'");
 check(twitter.isExactPromotedLabel("مُروّج"), "matches Arabic 'مُروّج'");
 check(twitter.isExactPromotedLabel("مروج"), "matches Arabic normalized 'مروج'");
+check(twitter.isExactPromotedLabel("الإعلان"), "matches Arabic 'الإعلان'");
+check(twitter.isExactPromotedLabel("الاعلان"), "matches Arabic normalized 'الاعلان'");
+check(twitter.isExactPromotedLabel("إعلان"), "matches Arabic 'إعلان'");
+check(twitter.isExactPromotedLabel("اعلان"), "matches Arabic normalized 'اعلان'");
 check(twitter.isExactPromotedLabel("Sponsorisé"), "matches French 'Sponsorisé'");
 check(twitter.isExactPromotedLabel("Gesponsert"), "matches German 'Gesponsert'");
 check(twitter.isExactPromotedLabel("Реклама"), "matches Russian 'Реклама'");
@@ -105,6 +109,37 @@ const mockTweetWithArticleLink = {
   }
 };
 check(!twitter.isPromotedTweet(mockTweetWithArticleLink), "rejects tweet with generic /ads link");
+
+// 8. Advertiser link with twclid (Twitter Click ID) must be flagged
+const mockAdWithTwclid = {
+  querySelector: () => null,
+  querySelectorAll: (selector) => {
+    if (selector.includes('twclid=')) {
+      return [{
+        getAttribute: () => 'https://example.com/?twclid=12345',
+        closest: () => null
+      }];
+    }
+    return [];
+  }
+};
+check(twitter.isPromotedTweet(mockAdWithTwclid), "detects promoted tweet via twclid parameter");
+
+// 9. Tweet body with 'إعلان رسمي' must NEVER be flagged
+const mockOrganicNewsTweet = {
+  querySelector: () => null,
+  querySelectorAll: (selector) => {
+    if (selector.includes('span')) {
+      return [{
+        textContent: "إعلان رسمي: تم افتتاح المعرض",
+        getAttribute: () => null,
+        closest: (ancestor) => (ancestor === '[data-testid="tweetText"]' ? {} : null)
+      }];
+    }
+    return [];
+  }
+};
+check(!twitter.isPromotedTweet(mockOrganicNewsTweet), "rejects organic news tweet with 'إعلان رسمي' in body");
 
 console.log("\n" + "=".repeat(64));
 console.log(`  Twitter / X: ${passed} passed, ${failed} failed`);
