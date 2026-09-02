@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Ad Blocker Pro",
-  "version": "4.3.1",
-  "description": "Ultra-fast Manifest V3 ad blocker: Core community filter lists, Facebook sponsored-post detection, YouTube ad skipping, Popunder neutralizer, and safe anti-adblock evasion.",
+  "version": "5.0.0",
+  "description": "Ultra-fast Manifest V3 ad blocker: Core community filter lists, Facebook & Instagram detection, YouTube instant-start, Twitter/X promoted tweet slayer, Element Zapper, Popunder neutralizer, and safe anti-adblock evasion.",
   "permissions": [
     "declarativeNetRequest",
     "declarativeNetRequestWithHostAccess",
@@ -143,6 +143,15 @@
         "*://*.instagram.com/*"
       ],
       "js": ["instagram.js"],
+      "run_at": "document_start",
+      "all_frames": false
+    },
+    {
+      "matches": [
+        "*://*.twitter.com/*",
+        "*://*.x.com/*"
+      ],
+      "js": ["twitter.js"],
       "run_at": "document_start",
       "all_frames": false
     }

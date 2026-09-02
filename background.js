@@ -18,6 +18,9 @@ const DEFAULTS = {
   ytHide: true,         // hide static ad slots
   ytCurtain: true,      // opaque cover over the player while an ad plays
 
+  // ---- Twitter / X module ----
+  twitterBlock: true,   // auto-hide promoted tweets and ads
+
   // ---- Filter lists ----
   useFilterLists: true,
   filterLists: ["easylist", "easyprivacy", "arabic"],
@@ -25,6 +28,8 @@ const DEFAULTS = {
   cosmeticCss: [],
 
   totalBlocked: 0,
+  todayBlocked: 0,
+  lastBlockedDate: "",
 
   whitelist: [
     "odoo.com",
@@ -144,9 +149,18 @@ chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
 
   switch (msg.type) {
     case "abpBlocked":
+    case "adBlocked":
       paintBadge(sender.tab && sender.tab.id, msg.count);
-      chrome.storage.local.get(["totalBlocked"], function (d) {
-        chrome.storage.local.set({ totalBlocked: ((d && d.totalBlocked) || 0) + 1 });
+      var todayStr = new Date().toISOString().slice(0, 10);
+      chrome.storage.local.get(["totalBlocked", "todayBlocked", "lastBlockedDate"], function (d) {
+        var tot = ((d && d.totalBlocked) || 0) + (msg.count || 1);
+        var lastDate = (d && d.lastBlockedDate) || "";
+        var tod = (lastDate === todayStr) ? (((d && d.todayBlocked) || 0) + (msg.count || 1)) : (msg.count || 1);
+        chrome.storage.local.set({
+          totalBlocked: tot,
+          todayBlocked: tod,
+          lastBlockedDate: todayStr
+        });
       });
       return false;
 
@@ -203,6 +217,39 @@ chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
           updateDynamicInjection({ antiAdblock: (data && data.antiAdblock), whitelist: whitelist });
           sendResponse({ whitelist: whitelist });
         });
+      });
+      return true;
+
+    case "addWhitelist":
+      chrome.storage.local.get(["whitelist", "antiAdblock"], function (data) {
+        let whitelist = (data && data.whitelist) || DEFAULTS.whitelist;
+        if (msg.hostname && whitelist.indexOf(msg.hostname) === -1) {
+          whitelist.push(msg.hostname);
+        }
+        chrome.storage.local.set({ whitelist: whitelist }, function () {
+          updateDynamicInjection({ antiAdblock: (data && data.antiAdblock), whitelist: whitelist });
+          sendResponse({ whitelist: whitelist });
+        });
+      });
+      return true;
+
+    case "removeWhitelist":
+      chrome.storage.local.get(["whitelist", "antiAdblock"], function (data) {
+        let whitelist = (data && data.whitelist) || DEFAULTS.whitelist;
+        const idx = whitelist.indexOf(msg.hostname);
+        if (idx !== -1) {
+          whitelist.splice(idx, 1);
+        }
+        chrome.storage.local.set({ whitelist: whitelist }, function () {
+          updateDynamicInjection({ antiAdblock: (data && data.antiAdblock), whitelist: whitelist });
+          sendResponse({ whitelist: whitelist });
+        });
+      });
+      return true;
+
+    case "clearCustomRules":
+      chrome.storage.local.remove("customUserRules", function () {
+        sendResponse({ ok: true });
       });
       return true;
   }

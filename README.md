@@ -1,25 +1,27 @@
-# 🛡️ Ad Blocker Pro Ultimate (v4.2.0)
+# 🛡️ Ad Blocker Pro Ultimate (v5.0.0)
 
 [![Manifest V3](https://img.shields.io/badge/Chrome-Manifest%20V3-blue.svg)](https://developer.chrome.com/docs/extensions/mv3/intro/)
-[![Tests](https://img.shields.io/badge/Tests-58%2F58%20Passing-brightgreen.svg)](tests/fb-detect.test.js)
+[![Tests](https://img.shields.io/badge/Tests-160%2F160%20Passing-brightgreen.svg)](tests/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Speed](https://img.shields.io/badge/Performance-Ultra--Fast-orange.svg)](#)
+[![Speed](https://img.shields.io/badge/Performance-Zero--Overhead-orange.svg)](#)
 
-A high-performance, lightweight Manifest V3 ad blocker engineered for modern Chromium browsers. Designed to replace legacy MV2 blockers with surgical precision, featuring native declarative network filtering, intelligent Facebook sponsored-post detection, YouTube Zero-Latency instant playback with multi-trap ad elimination, in-player popunder disarming, and undetectable anti-adblock evasion.
+A high-performance, lightweight Manifest V3 ad blocker engineered for modern Chromium browsers. Designed with surgical precision, featuring native declarative network filtering, intelligent Facebook sponsored-post detection, YouTube Zero-Latency instant playback with kickstart auto-play, Twitter / X promoted tweet annihilation, interactive Element Zapper, in-player popunder disarming, and undetectable anti-adblock evasion.
 
 ---
 
 ## ⚡ Key Highlights & Architecture
 
-| Feature | Legacy MV2 Blockers | Ad Blocker Pro Ultimate (v4.2.0) |
+| Feature | Legacy MV2 Blockers | Ad Blocker Pro Ultimate (v5.0.0) |
 | :--- | :--- | :--- |
 | **Manifest Compatibility** | Deprecated / Disabled in Chrome 120+ | **Native Manifest V3 Compliance** |
-| **Network Filtering** | Heavy webRequest memory overhead | **Pre-compiled DeclarativeNetRequest (Core 6 Lists)** |
+| **Network Filtering** | Heavy webRequest memory overhead | **Pre-compiled DeclarativeNetRequest (300,000+ Rules)** |
 | **Anti-Adblock Defusal** | Easily detected via missing global objects | **37 Web Accessible Resource Stubs (`noop.js`, `1x1.gif`)** |
-| **YouTube Ads** | Blocked with black screens or video freezes | **Multi-Trap JSON Stripper + Stealth Zero-Seek Annihilator** |
-| **Facebook & Reels** | Broken by class obfuscation | **Sub-pixel Visual Coordinate Reconstruction** |
-| **Video Player Popunders**| Intrusive new tabs on click | **Capture-Phase Click Interceptor & Auto-Closer** |
-| **Anti-DevTools Hijacking**| Redirects on F12 / Inspect | **Hardware Key & Debugger Loop Neutralizer** |
+| **YouTube Ads** | Blocked with black screens or video freezes | **In-Stream JSON Stripper + Instant Auto-Play Kickstart** |
+| **Facebook & Reels** | Broken by DOM obfuscation & black screens | **Visual Coordinate Reconstruction + Recycled-Node Guard** |
+| **Twitter / X Ads** | Promoted tweets clutter timeline | **Native Mutation-Shielded Promoted Tweet Slayer** |
+| **Element Zapper** | Third-party dependencies or missing | **Interactive 1-Click Element Picker & Custom Rules** |
+| **User Interface** | Fixed basic layout | **Modern Glassmorphic UI with Dark/Light & Bilingual (AR/EN)** |
+| **Video Popunders** | Intrusive new tabs on click | **Capture-Phase Click Interceptor & Auto-Closer** |
 
 ---
 

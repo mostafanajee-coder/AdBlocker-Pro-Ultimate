@@ -1,154 +1,638 @@
 <!DOCTYPE html>
-<html>
+<html lang="ar" dir="rtl">
 <head>
   <meta charset="utf-8">
+  <title>Ad Blocker Pro</title>
   <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
-    body { width: 280px; padding: 16px; background: #f8f9fa; }
-    h1 { font-size: 16px; font-weight: 700; margin-bottom: 12px; color: #1a73e8; }
-    .toggle-row { display: flex; align-items: center; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #e8eaed; }
-    .toggle-row:last-of-type { border-bottom: none; }
-    .toggle-label { font-size: 13px; color: #202124; }
-    .toggle { position: relative; width: 36px; height: 20px; cursor: pointer; }
-    .toggle input { opacity: 0; width: 0; height: 0; }
-    .slider { position: absolute; inset: 0; background: #ccc; border-radius: 20px; transition: 0.2s; }
-    .slider::before { content: ""; position: absolute; left: 2px; bottom: 2px; width: 16px; height: 16px; background: #fff; border-radius: 50%; transition: 0.2s; }
-    .toggle input:checked + .slider { background: #1a73e8; }
-    .toggle input:checked + .slider::before { transform: translateX(16px); }
-    .whitelist-btn { width: 100%; margin-top: 12px; padding: 8px; border: 1px solid #dadce0; border-radius: 6px; background: #fff; color: #202124; font-size: 13px; cursor: pointer; text-align: center; }
-    .whitelist-btn:hover { background: #f1f3f4; }
-    .whitelist-btn.active { background: #e8f0fe; color: #1a73e8; border-color: #1a73e8; }
-    .status { margin-top: 10px; font-size: 11px; color: #5f6368; text-align: center; }
-    .sep { border: none; border-top: 1px solid #e8eaed; margin: 8px 0; }
-    .section-title { margin: 14px 0 4px; font-size: 11px; font-weight: 700; letter-spacing: .6px; text-transform: uppercase; color: #1a73e8; border-bottom: 2px solid #1a73e8; padding-bottom: 4px; }
-    .counter { margin-top: 12px; padding: 8px; border-radius: 6px; background: #e8f0fe; color: #1a73e8; font-size: 13px; font-weight: 700; text-align: center; }
-    .filter-box { padding: 8px 0 4px; }
-    .filter-stat { font-size: 11px; color: #5f6368; text-align: center; line-height: 1.5; }
-    .filter-stat b { color: #1a73e8; }
+    :root {
+      --bg: #0b0f19;
+      --card-bg: rgba(22, 30, 49, 0.75);
+      --card-border: rgba(255, 255, 255, 0.08);
+      --text: #f1f5f9;
+      --text-muted: #94a3b8;
+      --primary: #38bdf8;
+      --primary-gradient: linear-gradient(135deg, #38bdf8 0%, #6366f1 100%);
+      --accent-green: #10b981;
+      --accent-red: #f43f5e;
+      --toggle-bg: #334155;
+      --toggle-active: #38bdf8;
+      --shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
+      --chip-bg: rgba(255, 255, 255, 0.06);
+    }
+
+    [data-theme="light"] {
+      --bg: #f8fafc;
+      --card-bg: rgba(255, 255, 255, 0.88);
+      --card-border: rgba(0, 0, 0, 0.08);
+      --text: #0f172a;
+      --text-muted: #64748b;
+      --primary: #0284c7;
+      --primary-gradient: linear-gradient(135deg, #0284c7 0%, #4f46e5 100%);
+      --accent-green: #059669;
+      --accent-red: #e11d48;
+      --toggle-bg: #cbd5e1;
+      --toggle-active: #0284c7;
+      --shadow: 0 6px 24px rgba(0, 0, 0, 0.08);
+      --chip-bg: rgba(0, 0, 0, 0.04);
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Noto Sans Arabic', sans-serif;
+      user-select: none;
+    }
+
+    body {
+      width: 360px;
+      max-height: 590px;
+      overflow-y: auto;
+      background: var(--bg);
+      color: var(--text);
+      padding: 16px;
+      transition: background 0.3s ease, color 0.3s ease;
+    }
+
+    body::-webkit-scrollbar {
+      width: 5px;
+    }
+    body::-webkit-scrollbar-thumb {
+      background: rgba(148, 163, 184, 0.3);
+      border-radius: 4px;
+    }
+
+    /* Header */
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 14px;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .brand-icon {
+      width: 34px;
+      height: 34px;
+      border-radius: 10px;
+      background: var(--primary-gradient);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 4px 12px rgba(56, 189, 248, 0.35);
+      color: #fff;
+      font-size: 18px;
+    }
+    .brand-title {
+      font-size: 15px;
+      font-weight: 700;
+      letter-spacing: -0.2px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .badge-pro {
+      font-size: 10px;
+      font-weight: 800;
+      padding: 2px 7px;
+      border-radius: 20px;
+      background: rgba(16, 185, 129, 0.15);
+      color: var(--accent-green);
+      border: 1px solid rgba(16, 185, 129, 0.3);
+      letter-spacing: 0.5px;
+    }
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .icon-btn {
+      width: 30px;
+      height: 30px;
+      border-radius: 8px;
+      background: var(--chip-bg);
+      border: 1px solid var(--card-border);
+      color: var(--text-muted);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 13px;
+      transition: all 0.2s ease;
+    }
+    .icon-btn:hover {
+      color: var(--text);
+      background: rgba(56, 189, 248, 0.15);
+      border-color: var(--primary);
+    }
+
+    /* Hero Card */
+    .hero-card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 14px;
+      padding: 14px;
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(16px);
+      margin-bottom: 12px;
+      position: relative;
+      overflow: hidden;
+    }
+    .hero-card::after {
+      content: "";
+      position: absolute;
+      top: -30px;
+      right: -30px;
+      width: 100px;
+      height: 100px;
+      background: radial-gradient(circle, rgba(56, 189, 248, 0.18) 0%, transparent 70%);
+      pointer-events: none;
+    }
+    .status-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 12px;
+    }
+    .status-indicator {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      font-weight: 600;
+    }
+    .pulse-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: var(--accent-green);
+      box-shadow: 0 0 10px var(--accent-green);
+      animation: pulse 2s infinite;
+    }
+    @keyframes pulse {
+      0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
+      70% { transform: scale(1); box-shadow: 0 0 0 8px rgba(16, 185, 129, 0); }
+      100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+    }
+    .domain-pill {
+      font-size: 11px;
+      color: var(--text-muted);
+      max-width: 170px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      direction: ltr;
+      text-align: right;
+    }
+
+    /* Stats Grid */
+    .stats-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+    .stat-box {
+      background: var(--chip-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 10px;
+      padding: 10px;
+      text-align: center;
+    }
+    .stat-num {
+      font-size: 20px;
+      font-weight: 800;
+      color: var(--primary);
+      line-height: 1.2;
+    }
+    .stat-label {
+      font-size: 10px;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.4px;
+      margin-top: 2px;
+    }
+
+    /* Quick Action Buttons */
+    .action-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-bottom: 14px;
+    }
+    .action-btn {
+      padding: 9px 12px;
+      border-radius: 10px;
+      border: 1px solid var(--card-border);
+      background: var(--card-bg);
+      color: var(--text);
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      transition: all 0.2s ease;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+    }
+    .action-btn:hover {
+      border-color: var(--primary);
+      background: rgba(56, 189, 248, 0.12);
+      transform: translateY(-1px);
+    }
+    .action-btn.active {
+      background: rgba(244, 63, 94, 0.15);
+      border-color: var(--accent-red);
+      color: var(--accent-red);
+    }
+
+    /* Section Card */
+    .section-card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 14px;
+      padding: 12px 14px;
+      margin-bottom: 12px;
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(14px);
+    }
+    .section-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 10px;
+      padding-bottom: 6px;
+      border-bottom: 1px solid var(--card-border);
+    }
+    .section-title {
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      color: var(--primary);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    /* Switch Rows */
+    .toggle-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 7px 0;
+    }
+    .toggle-row:not(:last-child) {
+      border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+    }
+    [data-theme="light"] .toggle-row:not(:last-child) {
+      border-bottom: 1px solid rgba(0, 0, 0, 0.03);
+    }
+    .toggle-info {
+      display: flex;
+      flex-direction: column;
+      gap: 1px;
+    }
+    .toggle-name {
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text);
+    }
+    .toggle-desc {
+      font-size: 10px;
+      color: var(--text-muted);
+    }
+
+    /* iOS Style Switch */
+    .switch {
+      position: relative;
+      display: inline-block;
+      width: 38px;
+      height: 22px;
+      flex-shrink: 0;
+    }
+    .switch input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+    .slider {
+      position: absolute;
+      cursor: pointer;
+      inset: 0;
+      background-color: var(--toggle-bg);
+      transition: 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+      border-radius: 24px;
+    }
+    .slider::before {
+      position: absolute;
+      content: "";
+      height: 16px;
+      width: 16px;
+      left: 3px;
+      bottom: 3px;
+      background-color: white;
+      transition: 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+      border-radius: 50%;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+    }
+    input:checked + .slider {
+      background: var(--primary-gradient);
+    }
+    input:checked + .slider::before {
+      transform: translateX(16px);
+    }
+
+    /* Whitelist Manager Drawer */
+    .whitelist-drawer {
+      display: none;
+      margin-top: 10px;
+      padding-top: 10px;
+      border-top: 1px dashed var(--card-border);
+    }
+    .whitelist-drawer.open {
+      display: block;
+      animation: fadeIn 0.2s ease;
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(-4px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .whitelist-input-group {
+      display: flex;
+      gap: 6px;
+      margin-bottom: 8px;
+    }
+    .whitelist-input {
+      flex: 1;
+      padding: 7px 10px;
+      border-radius: 8px;
+      background: var(--chip-bg);
+      border: 1px solid var(--card-border);
+      color: var(--text);
+      font-size: 11px;
+      direction: ltr;
+      outline: none;
+    }
+    .whitelist-input:focus {
+      border-color: var(--primary);
+    }
+    .add-btn {
+      padding: 7px 12px;
+      border-radius: 8px;
+      background: var(--primary-gradient);
+      color: #fff;
+      font-size: 11px;
+      font-weight: 600;
+      border: none;
+      cursor: pointer;
+    }
+    .whitelist-list {
+      max-height: 120px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .whitelist-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 5px 8px;
+      border-radius: 6px;
+      background: var(--chip-bg);
+      font-size: 11px;
+      direction: ltr;
+    }
+    .remove-domain-btn {
+      color: var(--accent-red);
+      cursor: pointer;
+      font-weight: bold;
+      padding: 0 4px;
+    }
+    .remove-domain-btn:hover {
+      opacity: 0.8;
+    }
+
+    /* Filter Update Box */
+    .filter-footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-top: 6px;
+      padding-top: 6px;
+      border-top: 1px solid var(--card-border);
+    }
+    .filter-info {
+      font-size: 10px;
+      color: var(--text-muted);
+    }
+    .filter-btn {
+      padding: 5px 10px;
+      border-radius: 6px;
+      border: 1px solid var(--card-border);
+      background: var(--chip-bg);
+      color: var(--text);
+      font-size: 10px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+    .filter-btn:hover {
+      border-color: var(--primary);
+      color: var(--primary);
+    }
   </style>
 </head>
 <body>
-  <h1>Ad Blocker Pro</h1>
 
-  <div class="toggle-row">
-    <span class="toggle-label">Ad Blocker</span>
-    <label class="toggle">
-      <input type="checkbox" id="adBlock">
-      <span class="slider"></span>
-    </label>
+  <!-- Header -->
+  <div class="header">
+    <div class="brand">
+      <div class="brand-icon">🛡️</div>
+      <div>
+        <div class="brand-title">
+          Ad Blocker Pro
+          <span class="badge-pro">v5.0.0</span>
+        </div>
+      </div>
+    </div>
+    <div class="header-actions">
+      <button class="icon-btn" id="langBtn" title="تغيير اللغة / Change Language">EN</button>
+      <button class="icon-btn" id="themeBtn" title="الوضع الليلي / Dark Mode">🌓</button>
+    </div>
   </div>
 
-  <div class="toggle-row">
-    <span class="toggle-label">Strict Tracking</span>
-    <label class="toggle">
-      <input type="checkbox" id="strictTracking">
-      <span class="slider"></span>
-    </label>
+  <!-- Hero Card -->
+  <div class="hero-card">
+    <div class="status-row">
+      <div class="status-indicator">
+        <div class="pulse-dot" id="pulseDot"></div>
+        <span id="statusTitle">الحماية نشطة</span>
+      </div>
+      <div class="domain-pill" id="domainDisplay">detecting...</div>
+    </div>
+
+    <div class="stats-grid">
+      <div class="stat-box">
+        <div class="stat-num" id="todayCount">0</div>
+        <div class="stat-label" data-i18n="todayBlocked">إعلانات اليوم</div>
+      </div>
+      <div class="stat-box">
+        <div class="stat-num" id="totalCount">0</div>
+        <div class="stat-label" data-i18n="totalBlocked">إجمالي المحجوب</div>
+      </div>
+    </div>
   </div>
 
-  <div class="toggle-row">
-    <span class="toggle-label">Anti-Adblock</span>
-    <label class="toggle">
-      <input type="checkbox" id="antiAdblock">
-      <span class="slider"></span>
-    </label>
+  <!-- Quick Action Buttons -->
+  <div class="action-row">
+    <button class="action-btn" id="zapperBtn" title="انقر لاختيار وحجب أي عنصر في الصفحة">
+      <span>⚡</span> <span data-i18n="elementZapper">حجب عنصر</span>
+    </button>
+    <button class="action-btn" id="whitelistToggleBtn" title="استثناء الموقع الحالي من الحجب">
+      <span>🛡️</span> <span id="whitelistBtnText" data-i18n="whitelistSite">استثناء الموقع</span>
+    </button>
   </div>
 
-  <div class="toggle-row">
-    <span class="toggle-label">Mouse Unlock</span>
-    <label class="toggle">
-      <input type="checkbox" id="mouseUnlock">
-      <span class="slider"></span>
-    </label>
+  <!-- Core Protection Card -->
+  <div class="section-card">
+    <div class="section-header">
+      <span class="section-title">
+        <span>⚙️</span> <span data-i18n="coreProtection">الحماية الأساسية</span>
+      </span>
+    </div>
+
+    <div class="toggle-row">
+      <div class="toggle-info">
+        <div class="toggle-name" data-i18n="adBlock">حاجب الإعلانات</div>
+        <div class="toggle-desc" data-i18n="adBlockDesc">حجب البانرات والنوافذ المنبثقة</div>
+      </div>
+      <label class="switch">
+        <input type="checkbox" id="adBlock">
+        <span class="slider"></span>
+      </label>
+    </div>
+
+    <div class="toggle-row">
+      <div class="toggle-info">
+        <div class="toggle-name" data-i18n="strictTracking">منع التتبع الصارم</div>
+        <div class="toggle-desc" data-i18n="strictTrackingDesc">حظر نصوص التجسس وجمع البيانات</div>
+      </div>
+      <label class="switch">
+        <input type="checkbox" id="strictTracking">
+        <span class="slider"></span>
+      </label>
+    </div>
+
+    <div class="toggle-row">
+      <div class="toggle-info">
+        <div class="toggle-name" data-i18n="antiAdblock">مكافحة كاشفات الحظر</div>
+        <div class="toggle-desc" data-i18n="antiAdblockDesc">تجاوز رسائل عطل مانع الإعلانات</div>
+      </div>
+      <label class="switch">
+        <input type="checkbox" id="antiAdblock">
+        <span class="slider"></span>
+      </label>
+    </div>
+
+    <div class="toggle-row">
+      <div class="toggle-info">
+        <div class="toggle-name" data-i18n="mouseUnlock">فك قيود الفأرة والنسخ</div>
+        <div class="toggle-desc" data-i18n="mouseUnlockDesc">تمكين التحديد والزر الأيمن للمواقع المقفلة</div>
+      </div>
+      <label class="switch">
+        <input type="checkbox" id="mouseUnlock">
+        <span class="slider"></span>
+      </label>
+    </div>
   </div>
 
-  <div class="section-title">Filter lists</div>
+  <!-- Platform Shields Card -->
+  <div class="section-card">
+    <div class="section-header">
+      <span class="section-title">
+        <span>🚀</span> <span data-i18n="platformShields">دروع المنصات الكبرى</span>
+      </span>
+    </div>
 
-  <div class="toggle-row">
-    <span class="toggle-label">Use filter lists</span>
-    <label class="toggle">
-      <input type="checkbox" id="useFilterLists">
-      <span class="slider"></span>
-    </label>
+    <!-- YouTube -->
+    <div class="toggle-row">
+      <div class="toggle-info">
+        <div class="toggle-name" data-i18n="ytSkip">يوتيوب (YouTube)</div>
+        <div class="toggle-desc" data-i18n="ytSkipDesc">تخطي الإعلانات الفوري وبدء التشغيل التلقائي</div>
+      </div>
+      <label class="switch">
+        <input type="checkbox" id="ytSkip">
+        <span class="slider"></span>
+      </label>
+    </div>
+
+    <!-- Facebook -->
+    <div class="toggle-row">
+      <div class="toggle-info">
+        <div class="toggle-name" data-i18n="fbSponsored">فيسبوك (Facebook)</div>
+        <div class="toggle-desc" data-i18n="fbSponsoredDesc">حجب المنشورات الممولة والريلز بدون تقطيع</div>
+      </div>
+      <label class="switch">
+        <input type="checkbox" id="fbSponsored">
+        <span class="slider"></span>
+      </label>
+    </div>
+
+    <!-- Twitter / X -->
+    <div class="toggle-row">
+      <div class="toggle-info">
+        <div class="toggle-name" data-i18n="twitterBlock">إكس / تويتر (X)</div>
+        <div class="toggle-desc" data-i18n="twitterBlockDesc">حجب التغريدات والمنشورات الممولة (مُروّج)</div>
+      </div>
+      <label class="switch">
+        <input type="checkbox" id="twitterBlock">
+        <span class="slider"></span>
+      </label>
+    </div>
   </div>
 
-  <div class="filter-box">
-    <div class="filter-stat" id="filterStat">Not built yet</div>
-    <button class="whitelist-btn" id="rebuildBtn" style="margin-top:8px">Update filter lists</button>
+  <!-- Whitelist Manager Card -->
+  <div class="section-card">
+    <div class="section-header">
+      <span class="section-title">
+        <span>📋</span> <span data-i18n="whitelistManager">إدارة المواقع المستثناة</span>
+      </span>
+      <button class="filter-btn" id="manageWhitelistToggle" data-i18n="manage">إدارة</button>
+    </div>
+
+    <div class="whitelist-drawer" id="whitelistDrawer">
+      <div class="whitelist-input-group">
+        <input type="text" class="whitelist-input" id="newDomainInput" placeholder="example.com">
+        <button class="add-btn" id="addDomainBtn" data-i18n="add">إضافة</button>
+      </div>
+      <div class="whitelist-list" id="whitelistList">
+        <!-- populated dynamically -->
+      </div>
+    </div>
   </div>
 
-  <div class="section-title">YouTube</div>
+  <!-- Community Filters Card -->
+  <div class="section-card">
+    <div class="section-header">
+      <span class="section-title">
+        <span>🌐</span> <span data-i18n="communityFilters">قواعد الحجب المدمجة</span>
+      </span>
+      <label class="switch">
+        <input type="checkbox" id="useFilterLists">
+        <span class="slider"></span>
+      </label>
+    </div>
 
-  <div class="toggle-row">
-    <span class="toggle-label">Skip video ads</span>
-    <label class="toggle">
-      <input type="checkbox" id="ytSkip">
-      <span class="slider"></span>
-    </label>
+    <div class="filter-footer">
+      <div class="filter-info" id="filterStat">300,000+ قاعدة شبكية مفعلة</div>
+      <button class="filter-btn" id="rebuildBtn" data-i18n="update">تحديث</button>
+    </div>
   </div>
-
-  <div class="toggle-row">
-    <span class="toggle-label">Hide ad slots</span>
-    <label class="toggle">
-      <input type="checkbox" id="ytHide">
-      <span class="slider"></span>
-    </label>
-  </div>
-
-  <div class="toggle-row">
-    <span class="toggle-label" title="Cover the player so an ad is never seen or heard">Blackout during ads</span>
-    <label class="toggle">
-      <input type="checkbox" id="ytCurtain">
-      <span class="slider"></span>
-    </label>
-  </div>
-
-  <div class="section-title">Facebook</div>
-
-  <div class="toggle-row">
-    <span class="toggle-label">Sponsored posts</span>
-    <label class="toggle">
-      <input type="checkbox" id="fbSponsored">
-      <span class="slider"></span>
-    </label>
-  </div>
-
-  <div class="toggle-row">
-    <span class="toggle-label">Sidebar ads</span>
-    <label class="toggle">
-      <input type="checkbox" id="fbSidebar">
-      <span class="slider"></span>
-    </label>
-  </div>
-
-  <div class="toggle-row">
-    <span class="toggle-label">"Suggested for you"</span>
-    <label class="toggle">
-      <input type="checkbox" id="fbSuggested">
-      <span class="slider"></span>
-    </label>
-  </div>
-
-  <div class="toggle-row">
-    <span class="toggle-label">Reels shelf</span>
-    <label class="toggle">
-      <input type="checkbox" id="fbReels">
-      <span class="slider"></span>
-    </label>
-  </div>
-
-  <div class="toggle-row">
-    <span class="toggle-label" title="Outline ads in red instead of hiding them">Debug: outline only</span>
-    <label class="toggle">
-      <input type="checkbox" id="fbDebug">
-      <span class="slider"></span>
-    </label>
-  </div>
-
-  <div class="counter" id="counter">0 blocked</div>
-
-  <button class="whitelist-btn" id="whitelistBtn">Whitelist this site</button>
-  <div class="status" id="statusText">Checking...</div>
 
   <script src="popup.js"></script>
 </body>
