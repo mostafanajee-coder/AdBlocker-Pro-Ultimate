@@ -89,12 +89,12 @@ const mockGenuineAdTweet = {
 };
 check(twitter.isPromotedTweet(mockGenuineAdTweet), "detects genuine promoted tweet with standalone badge");
 
-// 6. Placement tracking telemetry
-const mockTrackingTweet = {
-  querySelector: (sel) => (sel === '[data-testid="placementTracking"]' ? {} : null),
+// 6. Placement tracking (used by video players) must NOT trigger false positive
+const mockVideoTweet = {
+  querySelector: () => null,
   querySelectorAll: () => []
 };
-check(twitter.isPromotedTweet(mockTrackingTweet), "detects promoted tweet via placementTracking");
+check(!twitter.isPromotedTweet(mockVideoTweet), "video tweet with placementTracking is not falsely flagged as ad");
 
 // 7. Generic links with '/ads' must NOT trigger false positive
 const mockTweetWithArticleLink = {

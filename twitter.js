@@ -44,12 +44,7 @@
   function isPromotedTweet(article) {
     if (!article) return false;
 
-    // 1. Placement Tracking Anchor / Element (Twitter's official ad telemetry attribute)
-    if (article.querySelector('[data-testid="placementTracking"]')) {
-      return true;
-    }
-
-    // 2. Official Twitter Ads Link (Strict domain matching, NEVER bare "/ads")
+    // 1. Official Twitter Ads Link (Strict domain matching, NEVER bare "/ads")
     const adLinks = article.querySelectorAll(
       'a[href*="ads.twitter.com"], ' +
       'a[href*="ads.x.com"], ' +
