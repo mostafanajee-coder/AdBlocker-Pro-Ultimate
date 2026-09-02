@@ -77,13 +77,28 @@
 
   var currentLang = "ar";
 
-  function applyLanguage(lang) {
+  function getBrowserLanguage() {
+    var uiLang = "";
+    try {
+      if (typeof chrome !== "undefined" && chrome.i18n && typeof chrome.i18n.getUILanguage === "function") {
+        uiLang = chrome.i18n.getUILanguage();
+      }
+    } catch (_) {}
+    if (!uiLang && typeof navigator !== "undefined") {
+      uiLang = navigator.language || (navigator.languages && navigator.languages[0]) || "";
+    }
+    uiLang = (uiLang || "").toLowerCase();
+    return uiLang.startsWith("ar") ? "ar" : "en";
+  }
+
+  function applyLanguage(lang, save) {
     currentLang = lang;
     document.documentElement.lang = lang;
     document.documentElement.dir = (lang === "ar") ? "rtl" : "ltr";
 
-    var t = TRANSLATIONS[lang] || TRANSLATIONS.ar;
-    document.getElementById("langBtn").textContent = t.langBtn;
+    var t = TRANSLATIONS[lang] || TRANSLATIONS.en;
+    var btn = document.getElementById("langBtn");
+    if (btn) btn.textContent = t.langBtn;
 
     document.querySelectorAll("[data-i18n]").forEach(function (el) {
       var key = el.getAttribute("data-i18n");
@@ -92,7 +107,14 @@
       }
     });
 
-    chrome.storage.local.set({ userLang: lang });
+    var input = document.getElementById("newDomainInput");
+    if (input) {
+      input.placeholder = (lang === "ar") ? "أدخل النطاق مثل: example.com" : "Enter domain e.g. example.com";
+    }
+
+    if (save) {
+      chrome.storage.local.set({ userLang: lang, userLangCustom: true });
+    }
   }
 
   function applyTheme(theme) {
@@ -187,14 +209,14 @@
 
   function init() {
     // Theme & Language persistence
-    chrome.storage.local.get(["userTheme", "userLang"], function (pref) {
+    chrome.storage.local.get(["userTheme", "userLang", "userLangCustom"], function (pref) {
       if (pref && pref.userTheme) {
         applyTheme(pref.userTheme);
       }
-      if (pref && pref.userLang) {
-        applyLanguage(pref.userLang);
+      if (pref && pref.userLangCustom && pref.userLang) {
+        applyLanguage(pref.userLang, false);
       } else {
-        applyLanguage("ar");
+        applyLanguage(getBrowserLanguage(), false);
       }
     });
 
@@ -206,7 +228,7 @@
 
     // Language toggle button
     document.getElementById("langBtn").addEventListener("click", function () {
-      applyLanguage(currentLang === "ar" ? "en" : "ar");
+      applyLanguage(currentLang === "ar" ? "en" : "ar", true);
     });
 
     // Element Zapper Button

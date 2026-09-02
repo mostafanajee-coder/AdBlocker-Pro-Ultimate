@@ -250,10 +250,23 @@
     zapperOverlay.style.cssText = "position:fixed;pointer-events:none;border:2px dashed #ff3366;background:rgba(255,51,102,0.18);z-index:2147483646;display:none;transition:all 0.04s ease;box-sizing:border-box;";
     document.documentElement.appendChild(zapperOverlay);
 
+    var lang = "";
+    try {
+      if (typeof chrome !== "undefined" && chrome.i18n && typeof chrome.i18n.getUILanguage === "function") {
+        lang = chrome.i18n.getUILanguage();
+      }
+    } catch (_) {}
+    if (!lang && typeof navigator !== "undefined") {
+      lang = navigator.language || (navigator.languages && navigator.languages[0]) || "";
+    }
+    var isAr = (lang || "").toLowerCase().startsWith("ar");
+
     // Top instruction banner
     zapperBanner = document.createElement("div");
     zapperBanner.id = "abp-zapper-banner";
-    zapperBanner.innerHTML = "⚡ <b>أداة حجب العناصر</b>: انقر على أي عنصر لإخفائه نهائياً | <b>ESC</b> للإلغاء";
+    zapperBanner.innerHTML = isAr
+      ? "⚡ <b>أداة حجب العناصر</b>: انقر على أي عنصر لإخفائه نهائياً | <b>ESC</b> للإلغاء"
+      : "⚡ <b>Element Zapper</b>: Click any element to hide permanently | Press <b>ESC</b> to cancel";
     zapperBanner.style.cssText = "position:fixed;top:12px;left:50%;transform:translateX(-50%);background:rgba(20,20,30,0.92);color:#fff;padding:8px 18px;border-radius:30px;font-size:13px;font-family:sans-serif;z-index:2147483647;box-shadow:0 6px 20px rgba(0,0,0,0.4);border:1px solid rgba(255,255,255,0.15);backdrop-filter:blur(8px);cursor:default;";
     document.documentElement.appendChild(zapperBanner);
 
@@ -312,7 +325,11 @@
           }
         });
       }
-      showToast("✓ تم حجب العنصر وحفظ القاعدة بنجاح");
+      var isArToast = (function () {
+        var l = (typeof chrome !== "undefined" && chrome.i18n && chrome.i18n.getUILanguage) ? chrome.i18n.getUILanguage() : (navigator.language || "");
+        return (l || "").toLowerCase().startsWith("ar");
+      })();
+      showToast(isArToast ? "✓ تم حجب العنصر وحفظ القاعدة بنجاح" : "✓ Element hidden permanently");
     }
     stopZapper();
     return false;
@@ -321,7 +338,11 @@
   function onZapperKeyDown(e) {
     if (e.key === "Escape" || e.keyCode === 27) {
       stopZapper();
-      showToast("تم إلغاء وضع الحجب");
+      var isArCancel = (function () {
+        var l = (typeof chrome !== "undefined" && chrome.i18n && chrome.i18n.getUILanguage) ? chrome.i18n.getUILanguage() : (navigator.language || "");
+        return (l || "").toLowerCase().startsWith("ar");
+      })();
+      showToast(isArCancel ? "تم إلغاء وضع الحجب" : "Element zapper cancelled");
     }
   }
 

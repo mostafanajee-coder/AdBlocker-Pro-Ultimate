@@ -3,6 +3,17 @@
 <head>
   <meta charset="utf-8">
   <title>Ad Blocker Pro</title>
+  <script>
+    (function () {
+      try {
+        var l = (typeof chrome !== 'undefined' && chrome.i18n && chrome.i18n.getUILanguage) ? chrome.i18n.getUILanguage() : (navigator.language || '');
+        if (l && !l.toLowerCase().startsWith('ar')) {
+          document.documentElement.lang = 'en';
+          document.documentElement.dir = 'ltr';
+        }
+      } catch (_) {}
+    })();
+  </script>
   <style>
     :root {
       --bg: #0b0f19;
