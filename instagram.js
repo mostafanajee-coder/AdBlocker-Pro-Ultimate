@@ -77,7 +77,20 @@
       if (doc.getElementById("abp-instagram-ad-css")) return;
       var style = doc.createElement("style");
       style.id = "abp-instagram-ad-css";
-      style.textContent = "article[data-abp-instagram-ad='1'] { display: none !important; }";
+      style.textContent = [
+        "article[data-abp-instagram-ad='1'] {",
+        "  height: 0px !important;",
+        "  min-height: 0px !important;",
+        "  max-height: 0px !important;",
+        "  margin: 0px !important;",
+        "  padding: 0px !important;",
+        "  border: 0px !important;",
+        "  overflow: hidden !important;",
+        "  visibility: hidden !important;",
+        "  opacity: 0 !important;",
+        "  pointer-events: none !important;",
+        "}"
+      ].join("\n");
       (doc.head || doc.documentElement).appendChild(style);
     }
 
