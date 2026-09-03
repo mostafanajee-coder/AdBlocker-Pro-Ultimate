@@ -84,17 +84,20 @@
     function articleIsSponsored(article) {
       if (!article || article.nodeType !== 1) return false;
 
+      // 1. Official Instagram / Meta Ad Redirects & CTA links
       try {
         if (article.querySelector(
-          'a[href*="/ads/about"], a[href*="about/ads"], [data-ad-preview]'
+          'a[href*="/ads/ig_redirect"], a[href*="facebook.com/ads/"], a[href*="/ads/about"], a[href*="about/ads"], a[href*="enable_persistent_cta=true"], [data-ad-preview]'
         )) return true;
       } catch (_) {}
 
       var nodes;
       try { nodes = article.querySelectorAll("span, a, [aria-label]"); } catch (_) { return false; }
 
-      // Bound each card scan. A normal Instagram post is far below this, but
-      // the limit prevents a malformed subtree from causing expensive walks.
+      // 2. Official Header Badges ("Ad", "Sponsored", "مُموَّل", "إعلان", "برعاية", etc.)
+      var cardRect = null;
+      try { cardRect = article.getBoundingClientRect(); } catch (_) {}
+
       for (var i = 0; i < nodes.length && i < 300; i++) {
         var node = nodes[i];
         var aria = "";
@@ -103,20 +106,30 @@
           aria = node.getAttribute("aria-label") || node.getAttribute("title") || "";
           text = node.textContent || "";
         } catch (_) {}
-        if (isSponsoredLabel(aria)) return true;
-        if (!isSponsoredLabel(text)) continue;
 
-        // Instagram's sponsored marker is in the account/header area. Do not
-        // hide a legitimate post merely because its caption says "Sponsored".
+        if (isSponsoredLabel(aria)) return true;
+
+        var cleanText = normalize(text);
+        if (!cleanText) continue;
+
+        var inHeader = false;
         try {
-          if (node.closest("header")) return true;
-          var cardRect = article.getBoundingClientRect();
-          var labelRect = node.getBoundingClientRect();
-          if (cardRect.height > 0 && labelRect.height > 0 &&
-              labelRect.top <= cardRect.top + Math.min(260, cardRect.height * 0.4)) {
-            return true;
+          if (node.closest("header")) {
+            inHeader = true;
+          } else if (cardRect && cardRect.height > 0) {
+            var labelRect = node.getBoundingClientRect();
+            if (labelRect.height > 0 && labelRect.top <= cardRect.top + Math.min(260, cardRect.height * 0.4)) {
+              inHeader = true;
+            }
           }
         } catch (_) {}
+
+        // In header band: exact official "ad" badge or standard sponsored label
+        if (inHeader) {
+          if (cleanText === "ad" || isSponsoredLabel(text)) return true;
+        } else {
+          if (isSponsoredLabel(text)) return true;
+        }
       }
       return false;
     }
@@ -240,6 +253,8 @@
     }
 
     win.addEventListener("load", function () { schedule(doc); }, { once: true });
+    win.addEventListener("scroll", function () { schedule(doc); }, { passive: true });
+    win.addEventListener("wheel", function () { schedule(doc); }, { passive: true });
     schedule(doc);
   }
 
