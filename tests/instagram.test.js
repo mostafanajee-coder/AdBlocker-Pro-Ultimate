@@ -31,6 +31,16 @@ check(!IG.isSponsoredLabel("My sponsored project"), "rejects ordinary sentences 
 check(!IG.isSponsoredLabel("Ad Center"), "rejects non-ad UI text");
 check(!IG.isSponsoredLabel("منشور عادي"), "rejects a normal Arabic post label");
 
+check(IG.isSponsoredLabel("Paid partnership with Nike"), "matches English Paid partnership with brand");
+check(IG.isSponsoredLabel("شراكة مدفوعة مع اديداس"), "matches Arabic شراكة مدفوعة مع brand");
+check(IG.isSponsoredLabel("Sponsorisé"), "matches French Sponsorisé");
+check(IG.isSponsoredLabel("Gesponsert"), "matches German Gesponsert");
+check(IG.isSponsoredLabel("Publicidad"), "matches Spanish Publicidad");
+check(IG.isSponsoredLabel("Patrocinado"), "matches Spanish Patrocinado");
+check(IG.isSponsoredLabel("Реклама"), "matches Russian Реклама");
+check(!IG.isSponsoredLabel("Profile Details"), "rejects ordinary Profile Details");
+check(!IG.isSponsoredLabel("Public figures"), "rejects Public figures");
+
 const repo = path.resolve(__dirname, "..");
 const source = fs.readFileSync(path.join(repo, "instagram.js"), "utf8");
 const manifest = JSON.parse(fs.readFileSync(path.join(repo, "manifest.json"), "utf8"));
@@ -41,6 +51,7 @@ const entry = manifest.content_scripts.find((item) =>
 check(Boolean(entry && entry.matches.length === 1 && entry.matches[0].includes("instagram.com")), "module is scoped only to Instagram");
 check(!/setInterval\s*\(/.test(source), "Instagram detector uses no permanent polling interval");
 check(source.includes("article[data-abp-instagram-ad='1']"), "only marked post containers are hidden");
+check(source.includes("igSponsored"), "Instagram module binds to igSponsored toggle in storage");
 
 console.log("\n" + "=".repeat(64));
 console.log(`  Instagram: ${passed} passed, ${failed} failed`);

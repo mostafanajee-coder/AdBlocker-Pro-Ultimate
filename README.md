@@ -1,7 +1,7 @@
 # 🛡️ Ad Blocker Pro Ultimate (v5.0.0)
 
 [![Manifest V3](https://img.shields.io/badge/Chrome-Manifest%20V3-blue.svg)](https://developer.chrome.com/docs/extensions/mv3/intro/)
-[![Tests](https://img.shields.io/badge/Tests-176%2F176%20Passing-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/Tests-186%2F186%20Passing-brightgreen.svg)](tests/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Speed](https://img.shields.io/badge/Performance-Zero--Overhead-orange.svg)](#)
 
@@ -18,7 +18,7 @@ A high-performance, lightweight Manifest V3 ad blocker engineered for modern Chr
 | **Anti-Adblock Defusal** | Easily detected via missing global objects | **37 Web Accessible Resource Stubs (`noop.js`, `1x1.gif`)** |
 | **YouTube Ads** | Blocked with black screens or video freezes | **In-Stream JSON Stripper + Instant Auto-Play Kickstart** |
 | **Facebook & Reels** | Broken by DOM obfuscation & black screens | **Visual Coordinate Reconstruction + Recycled-Node Guard** |
-| **Instagram Ads** | Sponsored posts clutter feed | **Surgical Multi-lingual Sponsored Label Detection** |
+| **Instagram Ads** | Sponsored posts clutter feed | **Surgical Multi-lingual Sponsored Label Detection & Stories Auto-Skip** |
 | **Twitter / X Ads** | Promoted tweets clutter timeline | **Native Mutation-Shielded Promoted Tweet Slayer** |
 | **Element Zapper** | Third-party dependencies or missing | **Interactive 1-Click Element Picker & Custom Rules** |
 | **User Interface** | Fixed basic layout | **Modern Glassmorphic UI with Dark/Light & Bilingual (AR/EN)** |
@@ -56,11 +56,12 @@ Facebook delivers ads directly from its own origin (`facebook.com`) and continuo
 * **Bilingual Support (LTR & RTL)**: Fully handles right-to-left languages (Arabic: "مُموَّل", "إعلان", "برعاية") and left-to-right (English: "Sponsored", "Ad").
 * **Reels Shelf Suppression**: Cleanly removes sponsored cards from Reels and feeds without page stutter.
 
-### 5. 📸 Instagram Sponsored Content Blocker (`instagram.js`)
-Detects and neutralizes sponsored posts in Instagram feeds and stories:
-* Normalizes Arabic and Latin disclosure strings (`Sponsored`, `مُموَّل`, `إعلان`, `برعاية`).
-* Strips hidden zero-width and invisible DOM decoys.
-* Throttled mutation scanning with zero permanent polling loops.
+### 5. 📸 Instagram Sponsored Content & Stories Blocker (`instagram.js`)
+Detects and neutralizes sponsored posts, stories, and reels across Instagram:
+* **Dedicated Platform Shield Switch**: Easily toggled from the popup alongside YouTube, Facebook, and Twitter / X.
+* **Multilingual Recognition**: Normalizes Arabic, English, French, German, Spanish, and Russian disclosure strings (`Sponsored`, `مُموَّل`, `إعلان`, `برعاية`, `شراكة مدفوعة مع...`, `Paid partnership with...`).
+* **Story & Reel Auto-Advance**: Seamlessly skips sponsored stories without user intervention.
+* **Zero Overhead**: Throttled mutation scanning with microtask batching and zero permanent polling loops.
 
 ### 6. ⚡ Interactive Element Zapper & Custom Rules
 Built directly into the extension popup and content engine:

@@ -22,7 +22,16 @@
     "ممول",
     "اعلان",
     "برعاية",
-    "محتوى ممول"
+    "محتوى ممول",
+    "شراكة مدفوعة",
+    "اعلان ممول",
+    "sponsorise",
+    "sponsorisé",
+    "gesponsert",
+    "publicidad",
+    "patrocinado",
+    "sponsorizzato",
+    "реклама"
   ];
 
   function normalize(text) {
@@ -38,7 +47,12 @@
 
   function isSponsoredLabel(text) {
     var value = normalize(text);
-    return LABELS.indexOf(value) !== -1;
+    if (!value) return false;
+    if (LABELS.indexOf(value) !== -1) return true;
+    if (value.indexOf("paid partnership") === 0) return true;
+    if (value.indexOf("شراكة مدفوعة") === 0) return true;
+    if (value.indexOf("محتوى برعاية") === 0) return true;
+    return false;
   }
 
   function isWhitelisted(hostname, list) {
@@ -117,6 +131,39 @@
           videos[i].muted = true;
         }
       } catch (_) {}
+      try {
+        if (win.chrome && win.chrome.runtime && win.chrome.runtime.sendMessage) {
+          win.chrome.runtime.sendMessage({ type: "abpBlocked", count: 1, host: "instagram" }).catch(function () {});
+        }
+      } catch (_) {}
+    }
+
+    function checkStoriesAd() {
+      if (!enabled) return;
+      if (win.location && win.location.pathname && win.location.pathname.indexOf("/stories/") !== -1) {
+        var headers = doc.querySelectorAll("header, div[role='dialog'] header");
+        for (var i = 0; i < headers.length; i++) {
+          var h = headers[i];
+          var spans = h.querySelectorAll("span, a");
+          for (var j = 0; j < spans.length; j++) {
+            var txt = spans[j].textContent || spans[j].getAttribute("aria-label") || "";
+            if (isSponsoredLabel(txt)) {
+              try {
+                var nextBtn = doc.querySelector('button[aria-label*="Next" i], button[aria-label*="التالي" i], svg[aria-label*="Next" i], svg[aria-label*="التالي" i]');
+                if (nextBtn) {
+                  (nextBtn.closest("button") || nextBtn).click();
+                } else {
+                  doc.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", code: "ArrowRight", keyCode: 39, bubbles: true }));
+                }
+                if (win.chrome && win.chrome.runtime && win.chrome.runtime.sendMessage) {
+                  win.chrome.runtime.sendMessage({ type: "abpBlocked", count: 1, host: "instagram" }).catch(function () {});
+                }
+              } catch (_) {}
+              return;
+            }
+          }
+        }
+      }
     }
 
     function inspectArticle(article) {
@@ -143,6 +190,7 @@
       var roots = Array.from(pending);
       pending.clear();
       for (var i = 0; i < roots.length; i++) inspect(roots[i]);
+      checkStoriesAd();
     }
 
     function schedule(node) {
@@ -164,6 +212,7 @@
     function applySettings(settings) {
       settings = settings || {};
       enabled = settings.adBlock !== false &&
+                settings.igSponsored !== false &&
                 !isWhitelisted(win.location.hostname, settings.whitelist || []);
       if (enabled) schedule(doc);
       else revealAll();
@@ -171,9 +220,9 @@
 
     installStyle();
     try {
-      win.chrome.storage.local.get(["adBlock", "whitelist"], applySettings);
+      win.chrome.storage.local.get(["adBlock", "igSponsored", "whitelist"], applySettings);
       win.chrome.storage.onChanged.addListener(function () {
-        win.chrome.storage.local.get(["adBlock", "whitelist"], applySettings);
+        win.chrome.storage.local.get(["adBlock", "igSponsored", "whitelist"], applySettings);
       });
     } catch (_) {
       applySettings({});

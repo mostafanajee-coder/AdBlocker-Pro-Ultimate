@@ -21,6 +21,9 @@ const DEFAULTS = {
   // ---- Twitter / X module ----
   twitterBlock: true,   // auto-hide promoted tweets and ads
 
+  // ---- Instagram module ----
+  igSponsored: true,    // hide sponsored posts, stories and reels
+
   // ---- Filter lists ----
   useFilterLists: true,
   filterLists: ["easylist", "easyprivacy", "arabic"],

@@ -30,6 +30,8 @@
       fbSponsoredDesc: "حجب المنشورات الممولة والريلز بدون تقطيع",
       twitterBlock: "إكس / تويتر (X)",
       twitterBlockDesc: "حجب التغريدات والمنشورات الممولة (مُروّج)",
+      igSponsored: "إنستغرام (Instagram)",
+      igSponsoredDesc: "حجب المنشورات الممولة والقصص الإعلانية والريلز",
       whitelistManager: "إدارة المواقع المستثناة",
       manage: "إدارة",
       close: "إغلاق",
@@ -67,6 +69,8 @@
       fbSponsoredDesc: "Zero-overhead sponsored & reels filter",
       twitterBlock: "Twitter / X",
       twitterBlockDesc: "Slay promoted tweets & sponsored ads",
+      igSponsored: "Instagram",
+      igSponsoredDesc: "Filter sponsored posts, stories & reels",
       whitelistManager: "Whitelist Manager",
       manage: "Manage",
       close: "Close",
@@ -320,7 +324,7 @@
     // Bind settings toggles
     [
       "adBlock", "strictTracking", "antiAdblock", "mouseUnlock",
-      "ytSkip", "fbSponsored", "twitterBlock", "useFilterLists"
+      "ytSkip", "fbSponsored", "twitterBlock", "igSponsored", "useFilterLists"
     ].forEach(function (k) { bindToggle(k, k); });
 
     // Load active tab info
@@ -340,7 +344,7 @@
         // Set switches
         [
           "adBlock", "strictTracking", "antiAdblock", "mouseUnlock",
-          "ytSkip", "fbSponsored", "twitterBlock", "useFilterLists"
+          "ytSkip", "fbSponsored", "twitterBlock", "igSponsored", "useFilterLists"
         ].forEach(function (k) {
           var box = document.getElementById(k);
           if (box) box.checked = settings[k] === true;
