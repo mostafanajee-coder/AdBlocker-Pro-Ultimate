@@ -127,6 +127,7 @@
     if (!docRoot) return;
     if (enabled) {
       docRoot.removeAttribute(ROOT_DISABLED);
+      dismissEnforcement();
       schedule();
     } else {
       docRoot.setAttribute(ROOT_DISABLED, "1");
@@ -268,12 +269,62 @@
     if (startBurst !== false) scheduleBurst();
   }
 
+  function dismissEnforcement() {
+    if (!enabled) return;
+
+    var vms = document.querySelectorAll("ytd-enforcement-message-view-model");
+    var dialogs = [];
+
+    try {
+      var hasMatches = document.querySelectorAll("tp-yt-paper-dialog:has(ytd-enforcement-message-view-model)");
+      for (var h = 0; h < hasMatches.length; h++) dialogs.push(hasMatches[h]);
+    } catch (_) {}
+
+    for (var i = 0; i < vms.length; i++) {
+      var vm = vms[i];
+      var d = vm.closest ? vm.closest("tp-yt-paper-dialog") : vm.parentElement;
+      if (d && dialogs.indexOf(d) === -1) dialogs.push(d);
+      try { vm.remove(); } catch (_) {}
+    }
+
+    if (dialogs.length === 0 && vms.length === 0) return;
+
+    for (var j = 0; j < dialogs.length; j++) {
+      var dialog = dialogs[j];
+      try { if (typeof dialog.close === "function") dialog.close(); } catch (_) {}
+      dialog.removeAttribute("opened");
+      dialog.removeAttribute("aria-modal");
+      dialog.removeAttribute("prevent-autonav");
+      try { dialog.remove(); } catch (_) {}
+    }
+
+    var backdrops = document.querySelectorAll("tp-yt-iron-overlay-backdrop");
+    for (var b = 0; b < backdrops.length; b++) {
+      try { backdrops[b].remove(); } catch (_) {}
+    }
+
+    var current = findPlayer();
+    if (current) {
+      try { if (typeof current.focus === "function") current.focus(); } catch (_) {}
+      var video = current.querySelector("video.html5-main-video, video.video-stream") ||
+                  document.querySelector("video.html5-main-video, video.video-stream");
+      if (video && video.paused) {
+        try { if (typeof current.playVideo === "function") current.playVideo(); } catch (_) {}
+        try {
+          var p = video.play();
+          if (p && typeof p.catch === "function") p.catch(function () {});
+        } catch (_) {}
+      }
+    }
+  }
+
   function schedule() {
     if (queued) return;
     queued = true;
 
     var run = function () {
       queued = false;
+      dismissEnforcement();
       suppressCurrentAd(true);
     };
 
@@ -284,16 +335,23 @@
   function start() {
     installCss();
     loadSettings();
+    dismissEnforcement();
     bindPlayer(findPlayer());
     schedule();
 
     if (typeof MutationObserver === "function") {
-      var documentObserver = new MutationObserver(schedule);
+      var documentObserver = new MutationObserver(function () {
+        dismissEnforcement();
+        schedule();
+      });
       documentObserver.observe(document.documentElement, { childList: true, subtree: true });
     }
 
     ["yt-navigate-start", "yt-navigate-finish", "yt-page-data-updated"].forEach(function (name) {
-      window.addEventListener(name, schedule, true);
+      window.addEventListener(name, function () {
+        dismissEnforcement();
+        schedule();
+      }, true);
     });
 
     ["loadedmetadata", "durationchange", "playing"].forEach(function (name) {

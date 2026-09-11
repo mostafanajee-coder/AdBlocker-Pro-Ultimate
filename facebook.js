@@ -198,12 +198,22 @@
     }
   }
 
+  function findReelScroller(el) {
+    var p = el;
+    while (p && p !== document.body) {
+      if (p.scrollHeight > p.clientHeight && (window.getComputedStyle(p).overflowY === "auto" || window.getComputedStyle(p).overflowY === "scroll")) {
+        return p;
+      }
+      p = p.parentElement;
+    }
+    return document.querySelector('div[role="main"] [scrollable="true"]') || null;
+  }
+
   function advanceReelIfActive(el) {
     try {
       var r = el.getBoundingClientRect();
       var vh = window.innerHeight || 900;
-      if (r.top < vh * 0.5 && r.bottom > vh * 0.5) {
-        // Dispatch to document only (avoids double-firing on window)
+      if (r.top < vh * 0.6 && r.bottom > vh * 0.4) {
         var evt = new KeyboardEvent("keydown", {
           key: "ArrowDown",
           code: "ArrowDown",
@@ -213,13 +223,14 @@
           cancelable: true
         });
         document.dispatchEvent(evt);
+        window.dispatchEvent(evt);
 
-        // Fallback: if scroll position did not advance, scroll scroller by one viewport
+        // Fallback: smooth scroll the scroller
         setTimeout(function () {
           try {
             var cur = el.getBoundingClientRect();
-            if (cur.top < vh * 0.5 && cur.bottom > vh * 0.5) {
-              var scroller = el.closest('[scrollable="true"]') || document.querySelector('div[role="main"] [scrollable="true"]');
+            if (cur.top < vh * 0.6 && cur.bottom > vh * 0.4) {
+              var scroller = findReelScroller(el);
               if (scroller) {
                 scroller.scrollBy({ top: scroller.clientHeight || vh, behavior: "smooth" });
               }
@@ -233,7 +244,8 @@
   function hide(el, reason) {
     if (!el || el.__abpHidden) return false;
 
-    var isReel = (window.location && window.location.pathname.indexOf("/reel") !== -1) ||
+    var isReel = (reason === "sponsored-reel") ||
+                 (window.location && window.location.pathname.indexOf("/reel") !== -1) ||
                  (el.closest && el.closest('[aria-label*="Reel" i], [aria-label*="ريلز" i], [data-pagelet*="Reel" i]'));
 
     el.__abpHidden = true;
@@ -518,16 +530,45 @@
     "احجز الآن", "فتح الرابط", "استخدام التطبيق"
   ]);
 
+  function reelCardOf(video) {
+    if (!video) return null;
+    var cur = video;
+    var best = null;
+    for (var i = 0; i < 12 && cur && cur.parentElement && cur.parentElement !== document.body; i++) {
+      cur = cur.parentElement;
+      if (cur.getAttribute && cur.getAttribute("role") === "main") break;
+      var r = cur.getBoundingClientRect();
+      if (r.height >= 400 && r.width >= 240 && r.height <= 2600) {
+        best = cur;
+        if (cur.querySelector('a[href*="l.facebook.com"], a[href*="/reel/"], [aria-label*="Like" i], [aria-label*="إعجاب" i]')) {
+          break;
+        }
+      }
+    }
+    return best;
+  }
+
   /** Dedicated Scoped Sweeper for Facebook Reels ads (Zero global reflow) */
   function sweepReelAds() {
     if (!S.adBlock || (!S.fbSponsored && !S.fbSuggested)) return;
     var isReelsPage = (window.location && window.location.pathname.indexOf("/reel") !== -1) ||
-                      document.querySelector('div[aria-label*="Reel" i], div[aria-label*="ريلز" i], div[data-pagelet*="Reel" i]');
+                      Boolean(document.querySelector('div[aria-label*="Reel" i], div[aria-label*="ريلز" i], div[data-pagelet*="Reel" i], a[href*="/reel/"]'));
     if (!isReelsPage) return;
 
-    var reelCards = document.querySelectorAll('div[aria-label*="Reel" i], div[aria-label*="ريلز" i], div[data-pagelet*="Reel" i], div[role="main"] div[scrollable="true"] > div');
-    for (var i = 0; i < reelCards.length && i < 20; i++) {
-      var card = reelCards[i];
+    var candidates = [];
+    var videos = document.querySelectorAll('div[role="main"] video, video');
+    for (var v = 0; v < videos.length && v < 15; v++) {
+      var rc = reelCardOf(videos[v]);
+      if (rc && candidates.indexOf(rc) === -1) candidates.push(rc);
+    }
+
+    var legacyCards = document.querySelectorAll('div[aria-label*="Reel" i], div[aria-label*="ريلز" i], div[data-pagelet*="Reel" i]');
+    for (var lc = 0; lc < legacyCards.length && lc < 10; lc++) {
+      if (candidates.indexOf(legacyCards[lc]) === -1) candidates.push(legacyCards[lc]);
+    }
+
+    for (var i = 0; i < candidates.length; i++) {
+      var card = candidates[i];
       if (!card) continue;
 
       // Facebook recycles virtualized slide nodes. Restore any node we hid
@@ -539,26 +580,39 @@
       // POSITIVE TEST: A real Reels slide ALWAYS contains a <video>. Comment drawers, forms, and dialogs do NOT.
       if (!card.querySelector("video")) continue;
 
-      // Skip comment drawers, modals, input forms
-      if (card.matches && card.matches('[role="dialog"], [role="textbox"], form, [aria-label*="Comment" i], [aria-label*="تعليق" i]')) continue;
-      if (card.querySelector && card.querySelector('[role="dialog"], [role="textbox"], form, [aria-label*="Write a comment" i], [aria-label*="اكتب تعليق" i]')) continue;
+      // Skip comment drawers or input textboxes
+      if (card.matches && card.matches('[aria-label*="Comment" i], [aria-label*="تعليق" i]')) continue;
 
       var cr = card.getBoundingClientRect();
       if (cr.width < 100 || cr.height < 100) continue;
 
       var isAd = false;
 
-      // 1. Check for specific ad preferences / about links
-      if (card.querySelector('a[href*="/ads/about"], a[href*="facebook.com/ads/about"], a[href*="/ad_preferences/"]')) {
+      // 1. Check for specific ad preferences / about links or paid outbound links
+      if (card.querySelector('a[href*="l.facebook.com/l.php?u="][href*="utm_medium="], a[href*="l.facebook.com/l.php?u="][href*="fbclid"], a[href*="l.facebook.com/l.php?u="][href*="ad_id"], a[href*="/ads/about"], a[href*="facebook.com/ads/about"], a[href*="/ad_preferences/"]')) {
         isAd = true;
       }
 
-      // 2. Check for explicit ARIA labels on child elements
+      // 2. Check for explicit text badges ("Ad", "Sponsored", "مُموَّل", "ممول", "إعلان")
+      if (!isAd) {
+        var badgeEls = card.querySelectorAll('span, div, a');
+        for (var bi = 0; bi < badgeEls.length && bi < 25; bi++) {
+          var bEl = badgeEls[bi];
+          if (bEl.childElementCount > 3) continue;
+          var bText = (bEl.innerText || bEl.textContent || "").trim();
+          if (bText === "Ad" || bText === "Sponsored" || bText === "مُموَّل" || bText === "ممول" || bText === "إعلان") {
+            isAd = true;
+            break;
+          }
+        }
+      }
+
+      // 3. Check for explicit ARIA labels on child elements
       if (!isAd) {
         var ariaEls = card.querySelectorAll('[aria-label]');
         for (var a = 0; a < ariaEls.length && a < 15; a++) {
           var elAria = ariaEls[a];
-          if (elAria.closest('[role="dialog"], form, [aria-label*="Comment" i], [aria-label*="تعليق" i]')) continue;
+          if (elAria.closest('[aria-label*="Comment" i], [aria-label*="تعليق" i]')) continue;
           var labelText = norm(elAria.getAttribute("aria-label"));
           if (labelText && matchesAny(labelText, SPONSORED)) {
             isAd = true;
@@ -567,12 +621,12 @@
         }
       }
 
-      // 3. Check for exact CTA terms on interactive button controls
+      // 4. Check for exact CTA terms on interactive button controls
       if (!isAd) {
-        var ctaButtons = card.querySelectorAll('div[role="button"], a[role="link"], [data-testid="reel_cta_button"]');
+        var ctaButtons = card.querySelectorAll('div[role="button"], a[role="link"], a, [data-testid="reel_cta_button"]');
         for (var b = 0; b < ctaButtons.length && b < 10; b++) {
           var btn = ctaButtons[b];
-          if (btn.closest('[role="dialog"], form, [aria-label*="Comment" i], [aria-label*="تعليق" i]')) continue;
+          if (btn.closest('[aria-label*="Comment" i], [aria-label*="تعليق" i]')) continue;
           var btnText = norm(btn.innerText || btn.textContent || "");
           if (btnText) {
             for (var c = 0; c < REEL_CTA_TERMS.length; c++) {
@@ -586,12 +640,12 @@
         }
       }
 
-      // 4. Scoped header label check inside this specific card
+      // 5. Scoped header label check inside this specific card
       if (!isAd) {
         var spans = card.querySelectorAll('span, a');
-        for (var s = 0; s < spans.length && s < 20; s++) {
+        for (var s = 0; s < spans.length && s < 25; s++) {
           var sp = spans[s];
-          if (sp.closest('[role="dialog"], form, [aria-label*="Comment" i], [aria-label*="تعليق" i]')) continue;
+          if (sp.closest('[aria-label*="Comment" i], [aria-label*="تعليق" i]')) continue;
           if (sp.textContent && sp.textContent.length <= 40) {
             var lab = readLabel(sp);
             if (lab && matchesAny(lab, SPONSORED)) {

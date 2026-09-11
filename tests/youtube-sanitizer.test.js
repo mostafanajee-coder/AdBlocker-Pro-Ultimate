@@ -113,6 +113,9 @@ check(Boolean(youtubeMainEntry && youtubeMainEntry.world === "MAIN"), "response 
 check(Boolean(youtubeMainEntry && youtubeMainEntry.js[0] === "youtube-sanitizer.js"), "sanitizer loads before the MAIN interceptor");
 check(Boolean(youtubeMainEntry && youtubeMainEntry.all_frames && youtubeMainEntry.match_about_blank), "same-origin YouTube frames cannot bypass the interceptor");
 check(visualSource.includes("button.ytp-ad-skip-button"), "skip-ad controls are hidden by the visual guard");
+check(visualSource.includes("dismissEnforcement"), "enforcement dialogs are programmatically dismissed");
+check(visualSource.includes("tp-yt-iron-overlay-backdrop"), "modal backdrop overlay is removed");
+check(visualSource.includes("playVideo"), "video playback is restored upon enforcement dismissal");
 
 async function testMainWorldHooks() {
   section("MAIN-world fetch, XHR and bootstrap hooks");

@@ -1,7 +1,7 @@
-# 🛡️ Ad Blocker Pro Ultimate (v5.0.0)
+# 🛡️ Ad Blocker Pro Ultimate (v5.1.0)
 
 [![Manifest V3](https://img.shields.io/badge/Chrome-Manifest%20V3-blue.svg)](https://developer.chrome.com/docs/extensions/mv3/intro/)
-[![Tests](https://img.shields.io/badge/Tests-186%2F186%20Passing-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/Tests-189%2F189%20Passing-brightgreen.svg)](tests/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Speed](https://img.shields.io/badge/Performance-Zero--Overhead-orange.svg)](#)
 
@@ -11,7 +11,7 @@ A high-performance, lightweight Manifest V3 ad blocker engineered for modern Chr
 
 ## ⚡ Key Highlights & Architecture
 
-| Feature | Legacy MV2 Blockers | Ad Blocker Pro Ultimate (v5.0.0) |
+| Feature | Legacy MV2 Blockers | Ad Blocker Pro Ultimate (v5.1.0) |
 | :--- | :--- | :--- |
 | **Manifest Compatibility** | Deprecated / Disabled in Chrome 120+ | **Native Manifest V3 Compliance** |
 | **Network Filtering** | Heavy webRequest memory overhead | **Pre-compiled DeclarativeNetRequest (300,000+ Rules)** |
