@@ -6,6 +6,7 @@ const manifest = JSON.parse(fs.readFileSync(path.join(repo, 'manifest.json'), 'u
 const background = fs.readFileSync(path.join(repo, 'background.js'), 'utf8');
 const twitter = fs.readFileSync(path.join(repo, 'twitter.js'), 'utf8');
 const popclose = fs.readFileSync(path.join(repo, 'popclose.js'), 'utf8');
+const popup = fs.readFileSync(path.join(repo, 'popup.js'), 'utf8');
 
 let passed = 0;
 let failed = 0;
@@ -23,6 +24,14 @@ check(background.includes('"youtube-main-script"') && background.includes('setti
 check(background.includes('allowAllRequests') && background.includes('updateSessionRules'), 'whitelist has a network-level DNR allowAllRequests layer');
 check(background.includes('requestDomains: [domain]'), 'whitelist DNR rules cover domain and subdomains');
 check(background.includes('AD_RULESET_IDS') && background.includes('settings.adBlock !== false'), 'Ad Blocker toggle controls static ad rulesets');
+check(background.includes('const STRICT_TRACKING_RULESET_IDS = ["easyprivacy", "tracking"]'), 'Strict Tracking controls both EasyPrivacy and the extra tracking ruleset');
+const easyPrivacyResource = (manifest.declarative_net_request.rule_resources || []).find(r => r.id === 'easyprivacy');
+check(easyPrivacyResource && easyPrivacyResource.enabled === false, 'EasyPrivacy manifest default matches strictTracking=false');
+const war = manifest.web_accessible_resources || [];
+check(war.length === 1 && Array.isArray(war[0].resources) && !war[0].resources.includes('web_accessible_resources/*'), 'web accessible resources are explicitly scoped instead of wildcarded');
+check(war[0].resources.length === 36, 'only the 36 redirect resources referenced by shipped rulesets are exposed');
+check(background.includes('filterLists: ["arabic", "easylist"]'), 'default dynamic list selection avoids duplicating bundled EasyPrivacy network rules');
+check(!popup.includes('300,000+'), 'popup no longer advertises a fictional 300,000+ active-rule count');
 check(twitter.includes('twitterBlock') && twitter.includes('whitelist') && twitter.includes('adBlock'), 'Twitter module follows toggle, whitelist, and global blocker state');
 check(popclose.includes('settings.adBlock === false') && popclose.includes('isWhitelisted'), 'popunder closer respects global blocker state and whitelist');
 check(manifest.minimum_chrome_version === '119', 'minimum Chrome version covers dynamic MAIN-world related-frame registration');

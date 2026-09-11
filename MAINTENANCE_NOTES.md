@@ -1,27 +1,55 @@
-# Ad Blocker Pro Ultimate — v5.1.1 Maintenance Notes
+# Ad Blocker Pro Ultimate — v5.1.2 Filter Pipeline Maintenance
 
-This build is the first maintenance pass over v5.1.0. It intentionally focuses on correctness and settings wiring before adding new blocking features.
+This build is the second maintenance pass over v5.1.x. It studies engineering ideas from the public `217heidai/adblockfilters` project, then reimplements only the ideas that fit a Chromium Manifest V3 extension. No upstream project code is vendored into this extension.
 
-## Fixed in this pass
+## What was adopted conceptually
 
-- The whitelist now applies at the network layer through high-priority session-scoped `allowAllRequests` DNR rules. It therefore overrides the extension's own block/redirect rules for whitelisted page hierarchies.
-- The global **Ad Blocker** toggle now enables/disables the bundled ad-oriented static rulesets instead of only changing DOM behavior.
-- `inject.js` is no longer a permanent `<all_urls>` MAIN-world content script. It is dynamically registered only while **Anti-Adblock** is enabled and excludes whitelisted domains.
-- The YouTube sanitizer is no longer statically injected before settings are known. It is dynamically registered in the MAIN world only while global ad blocking and the YouTube blocker are enabled, excluding whitelisted domains.
-- Dynamic MAIN-world script registration uses `updateContentScripts()` when already registered, avoiding needless unregister/register gaps on service-worker restarts.
-- Twitter/X now honors `adBlock`, `twitterBlock`, and the whitelist and restores content that it hid when the feature is disabled.
-- The popup reloads the current tab when changing the global blocker, Anti-Adblock, or current-site whitelist so MAIN-world hooks and DOM state are applied cleanly.
-- `popclose.js` now checks global blocker state and whitelist before closing a candidate popup.
-- The Anti-Adblock `window.open` hook no longer blocks every iframe popup and no longer replaces legitimate `about:blank` windows on arbitrary sites.
-- Filter conversion now maps negated resource types such as `$~image` to DNR `excludedResourceTypes` instead of silently broadening the rule.
-- Community-filter replacement is now one atomic DNR update. If list download or installation fails, the previous working dynamic rules remain in place.
-- The release requires Chrome 119+ because the dynamically registered MAIN-world scripts use related-frame origin fallback.
-- Added regression tests for filter conversion and settings/whitelist wiring. Current automated suite: **207/207 passing**.
+- **Source-aware processing instead of blind mega-list loading.** Every runtime source now declares whether it contributes network rules, cosmetic selectors, or is already represented by a bundled static ruleset.
+- **Two-stage deduplication.** Exact duplicate filter lines are removed first, followed by semantic deduplication after conversion to DNR so option-order variants do not consume extra quota.
+- **Hierarchical domain compaction.** A pure-domain child rule such as `||ads.example.com^` is dropped when an equivalent `||example.com^` rule already covers it.
+- **Conservative conversion.** Unsupported ABP/AdGuard options are rejected rather than silently ignored. This prevents a narrow upstream rule from becoming broader during DNR conversion.
+- **Change fingerprints.** The final compiled DNR output is fingerprinted. If the installed managed-rule count and fingerprint are unchanged, Chrome is not asked to replace thousands of identical rules.
+- **Per-source provenance.** Reports now retain source role, bytes, parsed rules, unsupported lines, raw duplicates, semantic duplicates, compacted rules, selectors, and installed-rule counts.
 
-## Deliberately left for the next maintenance pass
+## MV3-specific improvements made in v5.1.2
 
-- Expand the filter-list parser beyond the current conservative ABP subset (domain-specific cosmetic rules, more option combinations, redirects/scriptlets where safe under MV3).
-- Narrow `web_accessible_resources` from a wildcard to only the resources actually referenced by redirect rules and consider dynamic URLs where compatible.
-- Decide and document the exact product semantics of baseline EasyPrivacy versus the **Strict Tracking** switch; v5.1.1 preserves the existing baseline privacy behavior.
-- Add browser-level integration tests in Chromium for real DNR precedence, extension reload/update behavior, and live toggle transitions; the current suite is unit/static regression coverage.
-- Review the streaming-site click-trap heuristics for false positives and replace broad hostname/path keywords with more targeted evidence where possible.
+- EasyList remains available at runtime for generic cosmetic selectors, but its network rules are no longer duplicated dynamically because they are already bundled as static DNR.
+- EasyPrivacy is no longer duplicated into the runtime dynamic quota. It is controlled consistently by **Strict Tracking** together with the extension's extra tracking ruleset.
+- The default manifest state now matches `strictTracking: false`; EasyPrivacy is disabled until Strict Tracking is enabled.
+- Runtime filter rules own IDs `100000..128999`. Refresh/clear operations touch only this range and therefore preserve unrelated dynamic rules.
+- Dynamic replacement remains atomic. A network-source download failure or rejected DNR update keeps the previous known-good ruleset.
+- Failed cosmetic refreshes keep the previous cosmetic selector set rather than installing a partial set.
+- Runtime source downloads are concurrent and validated against obviously invalid/HTML responses.
+- Only the 36 redirect resources actually referenced by shipped DNR rules are exposed through `web_accessible_resources`; the previous wildcard exposure was removed.
+
+## Deliberately NOT copied from the studied project
+
+- **No direct import of its generated mega-list.** That would duplicate sources already present in this extension and waste limited DNR quota.
+- **No DNS liveness scanner inside the browser extension.** Multi-resolver DNS validation is useful as a build/server pipeline, but it is inappropriate runtime work for a browser extension and adds networking/privacy/latency complexity.
+- **No automatic rewriting/deletion of upstream semantics beyond provably safe transforms.** The converter rejects syntax it cannot represent faithfully.
+- **No upstream GPL implementation code is included.** The extension uses its own implementation of the general engineering concepts above.
+
+## Parser safety policy
+
+The runtime ABP/AdGuard converter intentionally supports a conservative subset. It currently understands basic block/exception rules, first/third-party constraints, `match-case`, `domain=`, positive/negative supported resource types, literal path-style regex wrappers, and pure-domain filters. Unknown options, wildcard domain constraints, non-ASCII `urlFilter` values, unsafe regex syntax, and contradictory resource-type constraints are rejected rather than approximated.
+
+## Automated verification
+
+Current automated suite: **254/254 passing**.
+
+- Facebook detection: 104
+- YouTube sanitizer: 34
+- Instagram module: 23
+- Twitter/X module: 28
+- Filter engine regression: 27
+- Settings/whitelist wiring: 16
+- Filter pipeline integration: 22
+
+The pipeline integration tests use mocked Chrome DNR/storage and mocked filter downloads to verify ownership, failure safety, provenance, deduplication, domain compaction, static/dynamic overlap avoidance, and unchanged-build skipping.
+
+## Still recommended before public release
+
+- Run browser-level integration tests in actual Chromium for DNR precedence, extension update/reload behavior, filter refreshes, Strict Tracking transitions, and whitelist changes.
+- Exercise a representative live-site matrix to measure false positives and cosmetic breakage.
+- Add domain-scoped cosmetic-filter support only with a design that preserves source semantics and keeps CSS injection bounded.
+- Consider moving upstream list compilation to a controlled release/build pipeline if the project later needs heavier validation such as DNS liveness checks.

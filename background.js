@@ -26,7 +26,7 @@ const DEFAULTS = {
 
   // ---- Filter lists ----
   useFilterLists: true,
-  filterLists: ["easylist", "easyprivacy", "arabic"],
+  filterLists: ["arabic", "easylist"],
   filterReport: null,
   cosmeticCss: [],
 
@@ -44,7 +44,7 @@ const DEFAULTS = {
 };
 
 const AD_RULESET_IDS = ["ublock-filters", "easylist", "pgl", "ads"];
-const STRICT_TRACKING_RULESET_IDS = ["tracking"];
+const STRICT_TRACKING_RULESET_IDS = ["easyprivacy", "tracking"];
 const WHITELIST_RULE_BASE = 900000;
 const WHITELIST_RULE_LIMIT = 2000;
 

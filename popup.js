@@ -36,11 +36,11 @@
       manage: "إدارة",
       close: "إغلاق",
       add: "إضافة",
-      communityFilters: "قواعد التصفية المدمجة (DNR)",
+      communityFilters: "تحديثات قوائم المجتمع (DNR)",
       update: "تحديث",
       updating: "جاري التحديث...",
-      rulesActive: "قواعد مفعلة",
-      builtStat: "300,000+ قاعدة شبكية مفعلة",
+      rulesActive: "قاعدة ديناميكية مفعلة",
+      builtStat: "القواعد الثابتة مدمجة؛ حدّث لبناء القواعد الديناميكية",
       zapperTitle: "انقر لاختيار وحجب أي عنصر في الصفحة",
       whitelistTitle: "استثناء الموقع الحالي من الحجب"
     },
@@ -75,11 +75,11 @@
       manage: "Manage",
       close: "Close",
       add: "Add",
-      communityFilters: "Built-in DNR Rulesets",
+      communityFilters: "Community Filter Updates (DNR)",
       update: "Update",
       updating: "Updating...",
-      rulesActive: "active rules",
-      builtStat: "300,000+ active network rules",
+      rulesActive: "active dynamic rules",
+      builtStat: "Bundled static rules active; update to build dynamic rules",
       zapperTitle: "Click to select and hide any element",
       whitelistTitle: "Whitelist current site from blocking"
     }
@@ -323,7 +323,7 @@
           rebuildBtn.textContent = TRANSLATIONS[currentLang].update;
           var el = document.getElementById("filterStat");
           if (res && res.ok) {
-            var countStr = res.report && res.report.rules ? res.report.rules.toLocaleString() : "300,000+";
+            var countStr = res.report && Number.isFinite(res.report.rules) ? res.report.rules.toLocaleString() : "0";
             el.textContent = countStr + " " + (TRANSLATIONS[currentLang].rulesActive || "active rules");
           }
         });
@@ -362,6 +362,17 @@
         // Set counters
         document.getElementById("totalCount").textContent = (settings.totalBlocked || 0).toLocaleString();
         document.getElementById("todayCount").textContent = (settings.todayBlocked || 0).toLocaleString();
+
+        // Dynamic filter report (do not advertise a fictional hard-coded total).
+        var filterStat = document.getElementById("filterStat");
+        if (filterStat) {
+          var report = settings.filterReport;
+          if (report && Number.isFinite(report.rules)) {
+            filterStat.textContent = report.rules.toLocaleString() + " " + TRANSLATIONS[currentLang].rulesActive;
+          } else {
+            filterStat.textContent = TRANSLATIONS[currentLang].builtStat;
+          }
+        }
 
         // Whitelist rendering
         var wl = settings.whitelist || [];
