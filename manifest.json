@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Ad Blocker Pro",
-  "version": "5.1.0",
+  "version": "5.1.1",
   "description": "Ultra-fast Manifest V3 ad blocker: Core community filter lists, Facebook & Instagram detection, YouTube instant-start, Twitter/X promoted tweet slayer, Element Zapper, Popunder neutralizer, and safe anti-adblock evasion.",
   "permissions": [
     "declarativeNetRequest",
@@ -83,39 +83,30 @@
       "resources": [
         "web_accessible_resources/*"
       ],
-      "matches": ["<all_urls>"]
+      "matches": [
+        "<all_urls>"
+      ]
     }
   ],
   "content_scripts": [
     {
       "matches": [
-        "*://*.youtube.com/*",
-        "*://*.youtube-nocookie.com/*"
+        "<all_urls>"
       ],
-      "js": ["youtube-sanitizer.js", "youtube-main.js"],
-      "run_at": "document_start",
-      "world": "MAIN",
-      "all_frames": true,
-      "match_about_blank": true
-    },
-    {
-      "matches": ["<all_urls>"],
-      "js": ["inject.js"],
-      "run_at": "document_start",
-      "world": "MAIN",
-      "all_frames": true,
-      "match_about_blank": true
-    },
-    {
-      "matches": ["<all_urls>"],
-      "js": ["popclose.js"],
+      "js": [
+        "popclose.js"
+      ],
       "run_at": "document_start",
       "all_frames": false,
       "match_about_blank": true
     },
     {
-      "matches": ["<all_urls>"],
-      "js": ["content.js"],
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "content.js"
+      ],
       "run_at": "document_start",
       "all_frames": true,
       "match_about_blank": true
@@ -125,7 +116,10 @@
         "*://*.facebook.com/*",
         "*://*.messenger.com/*"
       ],
-      "js": ["fb-detect.js", "facebook.js"],
+      "js": [
+        "fb-detect.js",
+        "facebook.js"
+      ],
       "run_at": "document_start",
       "all_frames": false
     },
@@ -134,7 +128,9 @@
         "*://*.youtube.com/*",
         "*://*.youtube-nocookie.com/*"
       ],
-      "js": ["youtube.js"],
+      "js": [
+        "youtube.js"
+      ],
       "run_at": "document_start",
       "all_frames": false
     },
@@ -142,7 +138,9 @@
       "matches": [
         "*://*.instagram.com/*"
       ],
-      "js": ["instagram.js"],
+      "js": [
+        "instagram.js"
+      ],
       "run_at": "document_start",
       "all_frames": false
     },
@@ -151,9 +149,12 @@
         "*://*.twitter.com/*",
         "*://*.x.com/*"
       ],
-      "js": ["twitter.js"],
+      "js": [
+        "twitter.js"
+      ],
       "run_at": "document_start",
       "all_frames": false
     }
-  ]
+  ],
+  "minimum_chrome_version": "119"
 }

@@ -1,7 +1,7 @@
-# 🛡️ Ad Blocker Pro Ultimate (v5.1.0)
+# 🛡️ Ad Blocker Pro Ultimate (v5.1.1)
 
 [![Manifest V3](https://img.shields.io/badge/Chrome-Manifest%20V3-blue.svg)](https://developer.chrome.com/docs/extensions/mv3/intro/)
-[![Tests](https://img.shields.io/badge/Tests-189%2F189%20Passing-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/Tests-207%2F207%20Passing-brightgreen.svg)](tests/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Speed](https://img.shields.io/badge/Performance-Zero--Overhead-orange.svg)](#)
 
@@ -9,12 +9,16 @@ A high-performance, lightweight Manifest V3 ad blocker engineered for modern Chr
 
 ---
 
+## 🔧 v5.1.1 Maintenance Release
+
+This maintenance build fixes settings-to-engine wiring rather than adding new blocking features. The whitelist now has a network-level `allowAllRequests` DNR layer, the global Ad Blocker toggle controls bundled ad rulesets, YouTube and Anti-Adblock MAIN-world scripts are registered only when enabled, Twitter/X now respects its toggle and whitelist, the filter converter handles negated resource types, and dynamic filter replacement is atomic so a failed refresh keeps the previous working rules.
+
 ## ⚡ Key Highlights & Architecture
 
-| Feature | Legacy MV2 Blockers | Ad Blocker Pro Ultimate (v5.1.0) |
+| Feature | Legacy MV2 Blockers | Ad Blocker Pro Ultimate (v5.1.1) |
 | :--- | :--- | :--- |
 | **Manifest Compatibility** | Deprecated / Disabled in Chrome 120+ | **Native Manifest V3 Compliance** |
-| **Network Filtering** | Heavy webRequest memory overhead | **Pre-compiled DeclarativeNetRequest (300,000+ Rules)** |
+| **Network Filtering** | Heavy webRequest memory overhead | **18,434 bundled static DNR rules + up to 29,000 refreshed dynamic rules** |
 | **Anti-Adblock Defusal** | Easily detected via missing global objects | **37 Web Accessible Resource Stubs (`noop.js`, `1x1.gif`)** |
 | **YouTube Ads** | Blocked with black screens or video freezes | **In-Stream JSON Stripper + Instant Auto-Play Kickstart** |
 | **Facebook & Reels** | Broken by DOM obfuscation & black screens | **Visual Coordinate Reconstruction + Recycled-Node Guard** |
@@ -37,7 +41,7 @@ Ad Blocker Pro Ultimate incorporates the official, clean core filter lists from 
 * **`ublock-badware.json`**: Protection against forced redirects, phishing, and scam domains.
 * **`urlhaus-full.json`**: Real-time malware URL blocker.
 
-### 2. 🎬 YouTube In-Stream Zero-Latency Response Sanitizer (`inject.js`)
+### 2. 🎬 YouTube In-Stream Zero-Latency Response Sanitizer (`youtube-sanitizer.js`, `youtube-main.js`)
 YouTube injects ads directly into player streams via server responses. Ad Blocker Pro Ultimate intercepts `window.ytInitialPlayerResponse` and `/youtubei/v1/player` in the `MAIN` execution world before the YouTube Player Web Component initializes:
 * Strips `adPlacements`, `playerAds`, and `adSlots` payloads in place.
 * Bypasses video ad buffering entirely — videos launch instantly without black screens, freezes, or 16x acceleration artifacts.
@@ -104,11 +108,13 @@ Movie and anime streaming platforms deploy transparent overlays (`div[style*="z-
 ├── rulesets/
 │   └── main/                  # Core 6 DNR pre-compiled JSON rulesets
 ├── web_accessible_resources/  # 37 stub & noop redirect assets
-└── tests/                     # 172-test automated unit testing framework
-    ├── fb-detect.test.js      # Facebook coordinate detection suite (100 tests)
-    ├── youtube-sanitizer.test.js # YouTube JSON response stripping suite (31 tests)
-    ├── instagram.test.js      # Instagram sponsored detection suite (13 tests)
-    └── twitter.test.js        # Twitter / X exact-match ad detection suite (28 tests)
+└── tests/                     # 207-test automated unit testing framework
+    ├── fb-detect.test.js      # Facebook coordinate detection suite (104 tests)
+    ├── youtube-sanitizer.test.js # YouTube JSON response stripping suite (34 tests)
+    ├── instagram.test.js      # Instagram sponsored detection suite (23 tests)
+    ├── twitter.test.js        # Twitter / X exact-match ad detection suite (28 tests)
+    ├── filter-engine.test.js  # Filter conversion regression suite (8 tests)
+    └── settings-wiring.test.js # Toggle / whitelist wiring suite (10 tests)
 ```
 
 ---
@@ -129,7 +135,7 @@ Movie and anime streaming platforms deploy transparent overlays (`div[style*="z-
 
 ## 🧪 Automated Testing
 
-Ad Blocker Pro Ultimate includes a 176-test automated unit testing suite simulating complex DOM layouts, clipped decoys, multi-level nested SVG references, and bidirectional font rendering:
+Ad Blocker Pro Ultimate includes a 207-test automated unit testing suite simulating complex DOM layouts, clipped decoys, multi-level nested SVG references, and bidirectional font rendering:
 
 ```bash
 npm test
@@ -137,9 +143,11 @@ npm test
 
 ### Test Coverage Summary:
 * ✅ **Facebook Detection (104 tests)**: Multi-level nested SVG chains (`Ad`, `Sponsored`, `مُموَّل`), visual coordinate bounding boxes, zero-width joiner obfuscation, decoy clipping.
-* ✅ **YouTube Sanitizer (31 tests)**: `adPlacements` and `playerAds` stripping, feed & Shorts ad removal, XSSI prefix preservation, circular reference protection.
-* ✅ **Instagram Module (13 tests)**: Multi-lingual sponsored tokens, zero-width joiner extraction, non-ad label rejection.
+* ✅ **YouTube Sanitizer (34 tests)**: `adPlacements` and `playerAds` stripping, feed & Shorts ad removal, XSSI prefix preservation, circular reference protection.
+* ✅ **Instagram Module (23 tests)**: Multi-lingual sponsored tokens, zero-width joiner extraction, non-ad label rejection.
 * ✅ **Twitter / X Module (28 tests)**: Exact official tokens (`الإعلان`, `مُروّج`, `Promoted`, `Ad`), `twclid` attribution links, tweet body isolation, zero false positives.
+* ✅ **Filter Engine (8 tests)**: Negated resource types (`~image`), exception priority, and unsupported-option guards.
+* ✅ **Settings Wiring (10 tests)**: Dynamic MAIN-world registration, DNR whitelist, toggle wiring, and popunder/whitelist behavior.
 
 ```text
 ================================================================
@@ -148,7 +156,7 @@ npm test
   Instagram Module:    13 passed, 0 failed
   Twitter / X Module:  28 passed, 0 failed
 ================================================================
-  Total: 176 passed, 0 failed (100% Success)
+  Total: 207 passed, 0 failed (100% Success)
 ```
 
 ---

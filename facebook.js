@@ -47,6 +47,15 @@
     fbDebug: false       // outline instead of hide (for testing)
   };
 
+  function isWhitelisted(hostname, list) {
+    if (!hostname || !Array.isArray(list)) return false;
+    var parts = String(hostname).toLowerCase().split(".");
+    for (var i = 0; i < parts.length; i++) {
+      if (list.indexOf(parts.slice(i).join(".")) !== -1) return true;
+    }
+    return false;
+  }
+
   var blocked = 0;
   var seen = new WeakSet();      // elements already judged
   var pending = false;
@@ -761,7 +770,7 @@
         if (cfg) for (var k in S) if (cfg[k] !== undefined) S[k] = cfg[k];
 
         var wl = (cfg && cfg.whitelist) || [];
-        if (wl.indexOf("facebook.com") !== -1) return;
+        if (isWhitelisted(window.location.hostname, wl)) return;
 
         if (document.body) start();
         else document.addEventListener("DOMContentLoaded", start);

@@ -229,7 +229,15 @@
     el.addEventListener("change", function () {
       var update = {};
       update[settingKey] = this.checked;
-      chrome.runtime.sendMessage({ type: "updateSettings", settings: update });
+      chrome.runtime.sendMessage({ type: "updateSettings", settings: update }, function (resp) {
+        // MAIN-world script registration and broad blocker state only apply
+        // cleanly to the current document after a reload. Other per-site
+        // modules react live through chrome.storage.onChanged.
+        if (resp && resp.success && currentTabId &&
+            (settingKey === "adBlock" || settingKey === "antiAdblock")) {
+          chrome.tabs.reload(currentTabId);
+        }
+      });
     });
   }
 
@@ -299,6 +307,7 @@
         if (resp && resp.whitelist) {
           renderWhitelistItems(resp.whitelist);
           checkWhitelistStatus(resp.whitelist);
+          if (currentTabId) chrome.tabs.reload(currentTabId);
         }
       });
     });

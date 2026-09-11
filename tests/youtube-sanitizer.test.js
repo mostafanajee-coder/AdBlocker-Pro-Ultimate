@@ -102,16 +102,17 @@ const visualSource = fs.readFileSync(path.join(repo, "youtube.js"), "utf8");
 const mainSource = fs.readFileSync(path.join(repo, "youtube-main.js"), "utf8");
 const sharedSource = fs.readFileSync(path.join(repo, "inject.js"), "utf8");
 const manifest = JSON.parse(fs.readFileSync(path.join(repo, "manifest.json"), "utf8"));
-const youtubeMainEntry = manifest.content_scripts.find((entry) =>
+const backgroundSource = fs.readFileSync(path.join(repo, "background.js"), "utf8");
+const staticYoutubeMainEntry = manifest.content_scripts.find((entry) =>
   Array.isArray(entry.js) && entry.js.includes("youtube-main.js")
 );
 
 check(!/playbackRate\s*=\s*16/.test(visualSource + mainSource), "new YouTube engine never accelerates ads");
 check(!/setInterval\s*\(/.test(visualSource + mainSource), "new YouTube engine has no permanent polling interval");
 check(!/playbackRate\s*=\s*16|pulseYouTubePlayer/.test(sharedSource), "legacy accelerated engine is removed");
-check(Boolean(youtubeMainEntry && youtubeMainEntry.world === "MAIN"), "response interceptor runs in the MAIN world");
-check(Boolean(youtubeMainEntry && youtubeMainEntry.js[0] === "youtube-sanitizer.js"), "sanitizer loads before the MAIN interceptor");
-check(Boolean(youtubeMainEntry && youtubeMainEntry.all_frames && youtubeMainEntry.match_about_blank), "same-origin YouTube frames cannot bypass the interceptor");
+check(!staticYoutubeMainEntry && backgroundSource.includes('"youtube-main-script"') && backgroundSource.includes('world: "MAIN"'), "response interceptor is conditionally registered in the MAIN world");
+check(backgroundSource.includes('js: ["youtube-sanitizer.js", "youtube-main.js"]'), "sanitizer loads before the MAIN interceptor");
+check(backgroundSource.includes('allFrames: true') && backgroundSource.includes('matchOriginAsFallback: true'), "same-origin and related YouTube frames cannot bypass the interceptor");
 check(visualSource.includes("button.ytp-ad-skip-button"), "skip-ad controls are hidden by the visual guard");
 check(visualSource.includes("dismissEnforcement"), "enforcement dialogs are programmatically dismissed");
 check(visualSource.includes("tp-yt-iron-overlay-backdrop"), "modal backdrop overlay is removed");

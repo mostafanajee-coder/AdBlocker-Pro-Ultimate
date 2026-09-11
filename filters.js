@@ -104,6 +104,7 @@ const FILTERS = {
 
     const condition = {};
     const resourceTypes = [];
+    const excludedResourceTypes = [];
     let domains = null;
     let excludedDomains = null;
 
@@ -138,12 +139,16 @@ const FILTERS = {
         const neg = opt[0] === "~";
         const base = neg ? opt.slice(1) : opt;
         const mapped = FILTERS.TYPE_MAP[base];
-        if (mapped && !neg) resourceTypes.push(mapped);
+        if (mapped) {
+          if (neg) excludedResourceTypes.push(mapped);
+          else resourceTypes.push(mapped);
+        }
       }
     }
 
     condition.urlFilter = s;
-    if (resourceTypes.length) condition.resourceTypes = resourceTypes;
+    if (resourceTypes.length) condition.resourceTypes = Array.from(new Set(resourceTypes));
+    if (excludedResourceTypes.length) condition.excludedResourceTypes = Array.from(new Set(excludedResourceTypes));
     if (domains) condition.initiatorDomains = domains;
     if (excludedDomains) condition.excludedInitiatorDomains = excludedDomains;
 
@@ -258,31 +263,32 @@ const FILTERS = {
 
     if (onProgress) onProgress("Installing " + all.length.toLocaleString() + " rules…");
 
-    // Replace the whole dynamic set atomically.
+    const failedSources = report.sources.filter((src) => src.ok === false);
+    if (failedSources.length) {
+      report.installOk = false;
+      report.error = "One or more enabled filter lists could not be downloaded; keeping the previous ruleset.";
+      report.rules = await FILTERS.count();
+      return report;
+    }
+
+    // Replace the complete dynamic ruleset in one atomic DNR update. If Chrome
+    // rejects any rule, the previous working set remains intact.
     try {
       const existing = await chrome.declarativeNetRequest.getDynamicRules();
       const removeIds = existing.map((r) => r.id);
-
-      // Chrome rejects oversized single calls; install in batches.
       await chrome.declarativeNetRequest.updateDynamicRules({
         removeRuleIds: removeIds,
-        addRules: []
+        addRules: all
       });
-
-      const BATCH = 2000;
-      for (let i = 0; i < all.length; i += BATCH) {
-        try {
-          await chrome.declarativeNetRequest.updateDynamicRules({
-            addRules: all.slice(i, i + BATCH)
-          });
-        } catch (batchErr) {
-          console.warn("[Filters] Batch install warning:", batchErr.message);
-        }
-        if (onProgress) onProgress("Installing " + Math.min(i + BATCH, all.length).toLocaleString() +
-                                   " / " + all.length.toLocaleString());
-      }
+      report.installOk = true;
+      report.rules = all.length;
+      if (onProgress) onProgress("Installed " + all.length.toLocaleString() + " rules");
     } catch (ruleErr) {
-      console.warn("[Filters] Dynamic rules update failed:", ruleErr.message);
+      report.installOk = false;
+      report.error = ruleErr && ruleErr.message ? ruleErr.message : String(ruleErr);
+      report.rules = await FILTERS.count();
+      console.warn("[Filters] Dynamic rules update failed; previous rules kept:", report.error);
+      return report;
     }
 
     try {

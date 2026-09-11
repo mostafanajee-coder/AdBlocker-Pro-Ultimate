@@ -32,6 +32,18 @@
     '프로모션'
   ]);
 
+
+  let enabled = false;
+
+  function isWhitelisted(hostname, list) {
+    if (!hostname || !Array.isArray(list)) return false;
+    const parts = String(hostname).toLowerCase().split('.');
+    for (let i = 0; i < parts.length; i++) {
+      if (list.indexOf(parts.slice(i).join('.')) !== -1) return true;
+    }
+    return false;
+  }
+
   function normalizeText(str) {
     if (!str || typeof str !== 'string') return '';
     return str
@@ -122,6 +134,7 @@
   }
 
   function sweepTwitterAds() {
+    if (!enabled) return;
     try {
       const articles = document.querySelectorAll('article[data-testid="tweet"]');
       for (let i = 0; i < articles.length; i++) {
@@ -133,6 +146,7 @@
           article.style.setProperty('display', 'none', 'important');
           const cell = article.closest('[data-testid="cellInnerDiv"]');
           if (cell) {
+            cell.dataset.abpCollapsed = 'true';
             cell.style.setProperty('height', '0px', 'important');
             cell.style.setProperty('min-height', '0px', 'important');
             cell.style.setProperty('overflow', 'hidden', 'important');
@@ -161,9 +175,31 @@
     } catch (_) {}
   }
 
+  function restoreTwitterAds() {
+    try {
+      const blocked = document.querySelectorAll('[data-abp-blocked="true"]');
+      for (let i = 0; i < blocked.length; i++) {
+        blocked[i].style.removeProperty('display');
+        blocked[i].removeAttribute('data-abp-blocked');
+      }
+      const collapsed = document.querySelectorAll('[data-abp-collapsed="true"]');
+      for (let j = 0; j < collapsed.length; j++) {
+        const cell = collapsed[j];
+        cell.style.removeProperty('height');
+        cell.style.removeProperty('min-height');
+        cell.style.removeProperty('overflow');
+        cell.style.removeProperty('padding');
+        cell.style.removeProperty('margin');
+        cell.removeAttribute('data-abp-collapsed');
+      }
+      const checked = document.querySelectorAll('[data-abp-checked="true"]');
+      for (let k = 0; k < checked.length; k++) checked[k].removeAttribute('data-abp-checked');
+    } catch (_) {}
+  }
+
   let idleHandle = null;
   function scheduleSweep() {
-    if (idleHandle) return;
+    if (!enabled || idleHandle) return;
     if (typeof requestIdleCallback === 'function') {
       idleHandle = requestIdleCallback(() => {
         idleHandle = null;
@@ -177,19 +213,36 @@
     }
   }
 
+  function applySettings(settings) {
+    settings = settings || {};
+    const next = settings.adBlock !== false &&
+                 settings.twitterBlock !== false &&
+                 !isWhitelisted(window.location.hostname, settings.whitelist || []);
+    if (next === enabled) {
+      if (enabled) scheduleSweep();
+      return;
+    }
+    enabled = next;
+    if (!enabled) restoreTwitterAds();
+    else scheduleSweep();
+  }
+
+  function loadSettings() {
+    try {
+      chrome.storage.local.get(['adBlock', 'twitterBlock', 'whitelist'], applySettings);
+    } catch (_) {
+      applySettings({});
+    }
+  }
+
   function init() {
     if (typeof window === 'undefined' || !document || !document.body) {
-      if (typeof document !== 'undefined') {
-        document.addEventListener('DOMContentLoaded', init);
-      }
+      if (typeof document !== 'undefined') document.addEventListener('DOMContentLoaded', init, { once: true });
       return;
     }
 
-    // Initial sweep
-    sweepTwitterAds();
-
-    // Passive MutationObserver on timeline container
     const observer = new MutationObserver((mutations) => {
+      if (!enabled) return;
       for (let i = 0; i < mutations.length; i++) {
         if (mutations[i].addedNodes && mutations[i].addedNodes.length > 0) {
           scheduleSweep();
@@ -198,10 +251,16 @@
       }
     });
 
-    observer.observe(document.body, {
-      childList: true,
-      subtree: true
-    });
+    observer.observe(document.body, { childList: true, subtree: true });
+
+    try {
+      chrome.storage.onChanged.addListener(function (changes, areaName) {
+        if (areaName !== 'local') return;
+        if (changes.adBlock || changes.twitterBlock || changes.whitelist) loadSettings();
+      });
+    } catch (_) {}
+
+    loadSettings();
   }
 
   // Export for testing

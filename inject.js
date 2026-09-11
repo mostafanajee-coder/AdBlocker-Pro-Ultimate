@@ -67,8 +67,10 @@
       var isInsideIframe = window !== window.top;
       var curHost = window.location.hostname.toLowerCase();
 
-      // Rule A: Inside video iframes, window.open is 100% used for rogue popup ads
-      if (isInsideIframe) {
+      // Rule A: Do not blanket-block every iframe popup. Only block iframe
+      // opens when the destination is clearly ad-related or the frame itself
+      // belongs to a known streaming host.
+      if (isInsideIframe && (isStreamingSite(curHost) || (urlStr && AD_URL_REGEX.test(urlStr)))) {
         return null;
       }
 
@@ -82,8 +84,10 @@
         return null;
       }
 
-      // Rule D: Dummy window for about:blank redirect traps
-      if (!url || url === "about:blank") {
+      // Rule D: Dummy window for about:blank redirect traps, but only on
+      // streaming hosts. Legitimate sites often open about:blank for OAuth,
+      // editors, print previews, and other real workflows.
+      if (isStreamingSite(curHost) && (!url || url === "about:blank")) {
         var dummyWindow = {
           closed: false,
           focus: function () {},
