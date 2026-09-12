@@ -60,8 +60,7 @@
   var seen = new WeakSet();      // elements already judged
   var pending = false;
   var lastSweepTime = 0;
-  var MIN_SWEEP_GAP = 280;       // ms throttle between sweeps
-
+  var MIN_SWEEP_GAP = 80;        // ms throttle between sweeps
   /* ------------------------------------------------------------------ *
    * 2. DETECTION CORE INTEGRATION                                       *
    * ------------------------------------------------------------------ */
@@ -753,11 +752,11 @@
     var delay = force ? 0 : Math.max(0, MIN_SWEEP_GAP - elapsed);
 
     setTimeout(function () {
-      if (window.requestIdleCallback) {
-        requestIdleCallback(function () {
+      if (window.requestAnimationFrame) {
+        requestAnimationFrame(function () {
           lastSweepTime = Date.now();
           sweep();
-        }, { timeout: 180 });
+        });
       } else {
         lastSweepTime = Date.now();
         sweep();
@@ -814,7 +813,7 @@
       setTimeout(function () {
         scrollScheduled = false;
         schedule(false);
-      }, 350);
+      }, 80);
     }
 
     window.addEventListener("scroll", onScrollPassive, { passive: true, capture: true });
