@@ -480,7 +480,7 @@
     var labelledEls = main.querySelectorAll('[aria-labelledby]');
     for (var i = 0; i < labelledEls.length && i < 30; i++) {
       var el = labelledEls[i];
-      if (seen.has(el) || el.__abpHidden) continue;
+      if (el.__abpHidden) continue;
       if (el.closest && (el.closest('[role="navigation"], nav, header') || el.closest('[style*="-10000"]'))) continue;
 
       var refId = el.getAttribute("aria-labelledby");
@@ -784,17 +784,27 @@
     sweep();
 
     var observer = new MutationObserver(function (mutations) {
-      // Check if all mutations in this tick are video playback related
       var structuralChange = false;
       for (var m = 0; m < mutations.length; m++) {
         var mut = mutations[m];
-        if (mut.addedNodes && mut.addedNodes.length > 0) {
-          if (!isVideoMutation(mut)) {
-            structuralChange = true;
-            break;
-          }
+        
+        // Fast ignore for video/audio playback progress to prevent 60fps layout thrashing
+        var t = mut.target;
+        if (t) {
+            var tag = t.tagName;
+            if (tag === "VIDEO" || tag === "CANVAS" || tag === "SVG" || tag === "PATH") continue;
+            if (t.closest && t.closest('video, [role="progressbar"], [aria-label*="Play" i], [aria-label*="Pause" i], [aria-label*="Mute" i]')) continue;
+        }
+
+        structuralChange = true;
+        
+        // Invalidate the 'seen' cache for any mutated elements so they are re-scanned
+        if (t) {
+            seen.delete(t);
+            if (t.parentElement) seen.delete(t.parentElement);
         }
       }
+      
       if (structuralChange) {
         schedule(false);
       }
@@ -802,7 +812,10 @@
 
     observer.observe(document.documentElement, {
       childList: true,
-      subtree: true
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['aria-label', 'aria-labelledby', 'href', 'style', 'class'],
+      characterData: true
     });
 
     // Throttled passive scroll/gesture listeners
