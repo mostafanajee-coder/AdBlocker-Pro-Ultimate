@@ -76,13 +76,20 @@ class FakeElement extends FakeNode {
     return res.length > 0 ? res[0] : null;
   }
 
-  querySelectorAll(tag) {
+  querySelectorAll(sel) {
     const out = [];
-    const targetTag = tag ? tag.toUpperCase() : null;
+    let targetTag = null;
+    let targetAttr = null;
+    if (sel && sel.startsWith("[") && sel.endsWith("]")) {
+      targetAttr = sel.slice(1, -1);
+    } else if (sel) {
+      targetTag = sel.toUpperCase();
+    }
     (function walk(n) {
       for (const c of n.childNodes) {
         if (c.nodeType === 1) {
-          if (!targetTag || c.tagName === targetTag) out.push(c);
+          if (targetAttr && c.getAttribute(targetAttr) !== null) out.push(c);
+          else if (!targetAttr && (!targetTag || c.tagName === targetTag)) out.push(c);
           walk(c);
         }
       }

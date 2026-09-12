@@ -185,9 +185,18 @@
     el.__abpReelId = id;
     el.removeAttribute("data-abp-blocked");
     el.removeAttribute("data-abp-size");
+    el.style.removeProperty("display");
+    el.style.removeProperty("height");
+    el.style.removeProperty("min-height");
+    el.style.removeProperty("max-height");
+    el.style.removeProperty("margin");
+    el.style.removeProperty("padding");
+    el.style.removeProperty("border");
+    el.style.removeProperty("overflow");
     el.style.removeProperty("visibility");
     el.style.removeProperty("pointer-events");
     el.style.removeProperty("scroll-snap-align");
+    el.style.removeProperty("scroll-snap-stop");
 
     // Restore the audio state we captured when this node was hidden.
     try {
@@ -223,6 +232,16 @@
       var r = el.getBoundingClientRect();
       var vh = window.innerHeight || 900;
       if (r.top < vh * 0.6 && r.bottom > vh * 0.4) {
+        // 1. Try native Next button if present in Facebook Reels viewer
+        var nextBtn = document.querySelector(
+          '[aria-label*="Next video" i], [aria-label*="Next card" i], [aria-label*="Next" i], [aria-label*="الفيديو التالي" i], [aria-label*="التالي" i]'
+        );
+        if (nextBtn && nextBtn.click) {
+          nextBtn.click();
+          return;
+        }
+
+        // 2. Synthetic keyboard event
         var evt = new KeyboardEvent("keydown", {
           key: "ArrowDown",
           code: "ArrowDown",
@@ -234,18 +253,20 @@
         document.dispatchEvent(evt);
         window.dispatchEvent(evt);
 
-        // Fallback: smooth scroll the scroller
+        // 3. Container / window scroll fallback
         setTimeout(function () {
           try {
             var cur = el.getBoundingClientRect();
             if (cur.top < vh * 0.6 && cur.bottom > vh * 0.4) {
               var scroller = findReelScroller(el);
-              if (scroller) {
-                scroller.scrollBy({ top: scroller.clientHeight || vh, behavior: "smooth" });
+              if (scroller && scroller.scrollBy) {
+                scroller.scrollBy({ top: scroller.clientHeight || vh, behavior: "instant" });
+              } else {
+                window.scrollBy({ top: vh, behavior: "instant" });
               }
             }
           } catch (_) {}
-        }, 80);
+        }, 60);
       }
     } catch (_) {}
   }
@@ -294,10 +315,20 @@
     }
 
     if (isReel) {
-      // For Reels: hide visually and eliminate scroll snap target so carousel glides smoothly past it
+      // For Reels: collapse slide dimensions completely and remove scroll-snap
+      // Eliminates the 100vh black void caused by bare visibility:hidden on dark backgrounds
+      el.style.setProperty("display", "none", "important");
+      el.style.setProperty("height", "0px", "important");
+      el.style.setProperty("min-height", "0px", "important");
+      el.style.setProperty("max-height", "0px", "important");
+      el.style.setProperty("margin", "0px", "important");
+      el.style.setProperty("padding", "0px", "important");
+      el.style.setProperty("border", "0px", "important");
+      el.style.setProperty("overflow", "hidden", "important");
       el.style.setProperty("visibility", "hidden", "important");
       el.style.setProperty("pointer-events", "none", "important");
       el.style.setProperty("scroll-snap-align", "none", "important");
+      el.style.setProperty("scroll-snap-stop", "normal", "important");
       advanceReelIfActive(el);
     } else {
       el.style.setProperty("display", "none", "important");
@@ -337,7 +368,7 @@
 
   function findLabels() {
     var results = [];
-    var els = document.querySelectorAll("span, a, div[aria-label]");
+    var els = document.querySelectorAll("span, a, div[aria-label], div[aria-labelledby]");
     var vh = window.innerHeight || 900;
     var work = 0;
 
@@ -355,9 +386,13 @@
       var aria = e.getAttribute ? e.getAttribute("aria-label") : null;
       var hasUse = false;
       if (e.querySelector && e.querySelector("use")) hasUse = true;
+      var hasLabelledBy = false;
+      if ((e.getAttribute && e.getAttribute("aria-labelledby")) || (e.querySelector && e.querySelector("[aria-labelledby]"))) {
+        hasLabelledBy = true;
+      }
 
       // FAST PATH 2: String length check
-      if (!hasUse && !aria) {
+      if (!hasUse && !aria && !hasLabelledBy) {
         var rawLen = raw.length;
         if (rawLen === 0 || rawLen > 65) {
           seen.add(e);
@@ -435,6 +470,33 @@
         var cr = card.getBoundingClientRect();
         if (cr.height > 2600) continue;
         hide(card, "direct-ad-link");
+      }
+    }
+  }
+
+  /** Dedicated fast sweeper for aria-labelledby remote ad disclosure chips (Live FB Comet 2026) */
+  function sweepAriaLabelledAds() {
+    if (!S.adBlock || !S.fbSponsored) return;
+    var main = document.querySelector('div[role="main"]') || document.body;
+    var labelledEls = main.querySelectorAll('[aria-labelledby]');
+    for (var i = 0; i < labelledEls.length && i < 30; i++) {
+      var el = labelledEls[i];
+      if (seen.has(el) || el.__abpHidden) continue;
+      if (el.closest && (el.closest('[role="navigation"], nav, header') || el.closest('[style*="-10000"]'))) continue;
+
+      var refId = el.getAttribute("aria-labelledby");
+      if (!refId) continue;
+      var refEl = document.getElementById(refId);
+      if (!refEl) continue;
+
+      var refTxt = norm(refEl.textContent || refEl.innerText || "");
+      if (refTxt && matchesAny(refTxt, SPONSORED)) {
+        var card = postContainerOf(el);
+        if (card && !card.__abpHidden) {
+          var cr = card.getBoundingClientRect();
+          if (cr.height > 2600) continue;
+          hide(card, "aria-labelled-ad");
+        }
       }
     }
   }
@@ -674,6 +736,7 @@
   function sweep() {
     pending = false;
     try { sweepDirectAdLinks(); } catch (_) {}
+    try { sweepAriaLabelledAds(); } catch (_) {}
     try { sweepSvgAds(); } catch (_) {}
     try { restoreSvgTimestamps(); } catch (_) {}
     try { sweepLabels(); } catch (_) {}

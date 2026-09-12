@@ -396,9 +396,36 @@
 
     var aria = el.getAttribute ? (el.getAttribute("aria-label") || el.getAttribute("title") || el.getAttribute("data-content")) : null;
 
-    if (!raw.trim() && !hasSvgUse && !aria) return "";
+    // Accessibility reference resolution (Facebook Comet 2026):
+    // Facebook places the disclosure word ("Ad" / "Sponsored") in a remote element at the root of the page
+    // and points to it via aria-labelledby on an otherwise empty inline span/link.
+    var ariaLabelledByText = null;
+    var labelledEl = (el.getAttribute && el.getAttribute("aria-labelledby")) ? el : (el.querySelector ? el.querySelector("[aria-labelledby]") : null);
+    if (labelledEl) {
+      try {
+        var refId = labelledEl.getAttribute("aria-labelledby");
+        if (refId) {
+          var doc = (env && env.doc) || (el.ownerDocument || (typeof document !== "undefined" ? document : null));
+          var refEl = doc && doc.getElementById ? doc.getElementById(refId) : null;
+          if (refEl) {
+            ariaLabelledByText = (refEl.textContent || refEl.innerText || "").trim();
+          }
+        }
+      } catch (_) {}
+    }
+
+    if (!raw.trim() && !hasSvgUse && !aria && !ariaLabelledByText) return "";
 
     var txt = visibleText(el, env);
+
+    if (ariaLabelledByText) {
+      var normLabelled = norm(ariaLabelledByText);
+      if (matchesAny(normLabelled, SPONSORED) || matchesAny(normLabelled, SUGGESTED)) {
+        return normLabelled;
+      }
+      if (!txt) txt = ariaLabelledByText;
+      else txt = txt + " " + ariaLabelledByText;
+    }
 
     function resolveSvgTargetText(targetEl, doc, depth) {
       if (!targetEl || depth > 8) return "";
@@ -449,6 +476,7 @@
 
     // Fallback: check aria-label, title, or data-content if visibleText is empty
     if (aria) return norm(aria);
+    if (ariaLabelledByText) return norm(ariaLabelledByText);
     return "";
   }
 

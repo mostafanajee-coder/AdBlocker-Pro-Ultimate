@@ -444,6 +444,31 @@ section("12. SVG <use> label obfuscation");
 }
 
 /* ==========================================================================
+ * 13. aria-labelledby remote label obfuscation (Live Facebook Comet 2026)
+ * ======================================================================== */
+
+section("13. aria-labelledby label obfuscation");
+{
+  // Standalone empty span referencing remote <span id="_r_10_">Ad</span>
+  const remoteAdSpan = el("span", {}, { id: "_r_10_" }).append(txt("Ad"));
+  const envAria = makeEnv({ _r_10_: remoteAdSpan });
+
+  const emptySpan = el("span", {}, { "aria-labelledby": "_r_10_" });
+  const wrapperLink = el("a").append(emptySpan);
+
+  check("resolves remote aria-labelledby target text", D.readLabel(wrapperLink, envAria), "ad");
+  check("aria-labelledby matches SPONSORED", D.matchesAny(D.readLabel(wrapperLink, envAria), D.SPONSORED), true);
+
+  // Arabic remote label: <span id="_ar_ad_">مُموَّل</span>
+  const remoteArSpan = el("span", {}, { id: "_ar_ad_" }).append(txt("مُموَّل"));
+  const envAriaAr = makeEnv({ _ar_ad_: remoteArSpan });
+  const emptyArSpan = el("span", {}, { "aria-labelledby": "_ar_ad_" });
+
+  check("resolves remote Arabic aria-labelledby target text", D.readLabel(emptyArSpan, envAriaAr), "ممول");
+  check("Arabic aria-labelledby matches SPONSORED", D.matchesAny(D.readLabel(emptyArSpan, envAriaAr), D.SPONSORED), true);
+}
+
+/* ==========================================================================
  * Summary
  * ======================================================================== */
 
