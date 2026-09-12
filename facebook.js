@@ -112,8 +112,8 @@
     if (el.closest && (el.closest('[role="navigation"], nav, header') || el.closest('[style*="-10000"]'))) return null;
 
     // 1. Direct semantic container match if available
-    var directCard = el.closest('div[role="article"], div[data-pagelet*="FeedUnit"], div[role="feed"] > div');
-    if (directCard && directCard.clientHeight >= POST_MIN_H && directCard.clientHeight <= 2600) {
+    var directCard = el.closest('div[role="article"], div[data-pagelet*="FeedUnit"], div[aria-posinset]');
+    if (directCard) {
       return directCard;
     }
 
