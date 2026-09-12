@@ -271,13 +271,23 @@
   }
 
   function hide(el, reason) {
-    if (!el || el.__abpHidden) return false;
+    if (!el) return false;
+
+    var alreadyHidden = el.hasAttribute("data-abp-blocked");
+
+    if (!el.__abpHidden) {
+      el.__abpHidden = true;
+      blocked++;
+      mark("ready", { "fb-blocked": blocked });
+      report();
+    }
+
+    if (alreadyHidden) return false;
 
     var isReel = (reason === "sponsored-reel") ||
                  (window.location && window.location.pathname.indexOf("/reel") !== -1) ||
                  (el.closest && el.closest('[aria-label*="Reel" i], [aria-label*="ريلز" i], [data-pagelet*="Reel" i]'));
 
-    el.__abpHidden = true;
     el.setAttribute("data-abp-blocked", reason);
 
     // Record which creative this node was hidden for, so revalidateReel() can
@@ -337,9 +347,6 @@
       el.style.setProperty("padding", "0", "important");
     }
 
-    blocked++;
-    mark("ready", { "fb-blocked": blocked });
-    report();
     return true;
   }
 
@@ -465,7 +472,7 @@
     var adLinks = document.querySelectorAll('a[href*="/ads/about"], a[href*="facebook.com/ads/about"], a[href*="/about/ads"], a[href*="facebook.com/about/ads"], a[href*="/about_this_ad"], a[href*="/ad_preferences/"], a[href*="facebook.com/ad_preferences"]');
     for (var i = 0; i < adLinks.length && i < 30; i++) {
       var card = postContainerOf(adLinks[i]);
-      if (card && !card.__abpHidden) {
+      if (card) {
         var cr = card.getBoundingClientRect();
         if (cr.height > 2600) continue;
         hide(card, "direct-ad-link");
@@ -491,7 +498,7 @@
       var refTxt = norm(refEl.textContent || refEl.innerText || "");
       if (refTxt && matchesAny(refTxt, SPONSORED)) {
         var card = postContainerOf(el);
-        if (card && !card.__abpHidden) {
+        if (card) {
           var cr = card.getBoundingClientRect();
           if (cr.height > 2600) continue;
           hide(card, "aria-labelled-ad");
@@ -509,7 +516,7 @@
       var u = uses[i];
       if (u.closest && u.closest('[style*="-10000"]')) continue;
       var card = postContainerOf(u);
-      if (!card || card.__abpHidden) continue;
+      if (!card) continue;
       var cr = card.getBoundingClientRect();
       if (cr.bottom < -500 || cr.top < -5000) continue;
 
@@ -587,7 +594,7 @@
     var links = document.querySelectorAll('a[href*="/reel/"]');
     for (var i = 0; i < links.length && i < 20; i++) {
       var shelf = postContainerOf(links[i]);
-      if (shelf && !shelf.__abpHidden) hide(shelf, "reels");
+      if (shelf) hide(shelf, "reels");
     }
   }
 
@@ -781,6 +788,12 @@
 
   function start() {
     mark("ready", { "fb-labels": SPONSORED.length });
+    
+    // Inject global stylesheet as a safety net against React stripping inline styles
+    var style = document.createElement("style");
+    style.textContent = '[data-abp-blocked] { display: none !important; height: 0 !important; min-height: 0 !important; max-height: 0 !important; margin: 0 !important; padding: 0 !important; visibility: hidden !important; border: 0 !important; pointer-events: none !important; overflow: hidden !important; }';
+    if (document.head) document.head.appendChild(style);
+    
     sweep();
 
     var observer = new MutationObserver(function (mutations) {
