@@ -497,6 +497,7 @@
 
       var refTxt = norm(refEl.textContent || refEl.innerText || "");
       if (refTxt && matchesAny(refTxt, SPONSORED)) {
+        el.setAttribute("data-abp-ad-marker", "true");
         var card = postContainerOf(el);
         if (card) {
           var cr = card.getBoundingClientRect();
@@ -522,6 +523,8 @@
 
       var label = D.readLabel(u.parentElement || u, ENV);
       if (label && matchesAny(label, SPONSORED)) {
+        var markerEl = u.parentElement || u;
+        if (markerEl.setAttribute) markerEl.setAttribute("data-abp-ad-marker", "true");
         hide(card, "sponsored-svg");
       }
     }
@@ -583,6 +586,7 @@
         if (offsetFromCardTop > 240) continue;
       }
 
+      hit.el.setAttribute("data-abp-ad-marker", "true");
       hide(container, hit.kind);
     }
   }
@@ -741,6 +745,18 @@
 
   function sweep() {
     pending = false;
+
+    // Fast-path: Re-hide any known ad markers instantly (bypasses 'seen' cache)
+    try {
+      var markers = document.querySelectorAll('[data-abp-ad-marker="true"]');
+      for (var i = 0; i < markers.length; i++) {
+        var card = postContainerOf(markers[i]);
+        if (card && !card.hasAttribute("data-abp-blocked")) {
+          hide(card, "known-marker");
+        }
+      }
+    } catch (_) {}
+
     try { sweepDirectAdLinks(); } catch (_) {}
     try { sweepAriaLabelledAds(); } catch (_) {}
     try { sweepSvgAds(); } catch (_) {}
