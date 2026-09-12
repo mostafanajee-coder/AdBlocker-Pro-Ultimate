@@ -57,10 +57,18 @@
   }
 
   var blocked = 0;
-  var seen = new WeakSet();      // elements already judged
+  var seen = new WeakSet();      // global fast-path cache; card-local scans bypass it
+  var dirtyCards = [];
+  var dirtyCardSet = new WeakSet();
+  var labelCursor = 0;
+  var ariaCursor = 0;
+  var svgCursor = 0;
   var pending = false;
+  var globalSweepPending = false;
+  var sidebarDirty = false;
   var lastSweepTime = 0;
   var MIN_SWEEP_GAP = 80;        // ms throttle between sweeps
+  var SPECIAL_BATCH = 64;        // bounded rotating work for global ARIA/SVG discovery
   /* ------------------------------------------------------------------ *
    * 2. DETECTION CORE INTEGRATION                                       *
    * ------------------------------------------------------------------ */
@@ -111,9 +119,18 @@
     if (!el) return null;
     if (el.closest && (el.closest('[role="navigation"], nav, header') || el.closest('[style*="-10000"]'))) return null;
 
+    function hiddenBox(node) {
+      try {
+        var cs = getComputedStyle(node);
+        return cs && (cs.display === "none" || cs.visibility === "hidden" || parseFloat(cs.opacity) === 0);
+      } catch (_) {
+        return false;
+      }
+    }
+
     // 1. Direct semantic container match if available
     var directCard = el.closest('div[role="article"], div[data-pagelet*="FeedUnit"], div[aria-posinset]');
-    if (directCard) {
+    if (directCard && !hiddenBox(directCard)) {
       return directCard;
     }
 
@@ -128,14 +145,117 @@
       if (!n || n.tagName === "BODY" || n.tagName === "HTML") break;
       if (n.getAttribute && (n.getAttribute("role") === "navigation" || n.getAttribute("role") === "main" || n.getAttribute("role") === "feed" || n.tagName === "NAV" || n.tagName === "HEADER")) break;
       if (n.getAttribute && n.getAttribute("style") && n.getAttribute("style").indexOf("-10000") !== -1) break;
+      if (hiddenBox(n)) continue; // Do not select Facebook's hidden accessibility/template pool
       var r = n.getBoundingClientRect();
       if (r.bottom < -500 || r.top < -5000) break; // Off-screen definitions pool (-10000px) is NEVER a post card
       if (r.width > maxW || r.height > 2600) break;
-      if (r.width >= COLUMN_MIN && r.height >= POST_MIN_H) {
+      if (r.width >= COLUMN_MIN && (r.height >= POST_MIN_H || (n.tagName === "DIV" && r.height === 0))) {
         best = n; // Outermost valid container bounded by hard ceilings
       }
     }
     return best;
+  }
+
+  function elementOf(node) {
+    if (!node) return null;
+    return node.nodeType === 1 ? node : node.parentElement || null;
+  }
+
+  /** Queue the nearest feed card for a mutation-local re-evaluation. */
+  function queueDirtyCard(node) {
+    var el = elementOf(node);
+    if (!el) return null;
+    if (el.closest && el.closest('div[role="complementary"]')) return null;
+
+    var card = postContainerOf(el);
+    if (!card) return null;
+
+    if (!dirtyCardSet.has(card)) {
+      dirtyCardSet.add(card);
+      dirtyCards.push(card);
+    }
+    return card;
+  }
+
+  /**
+   * A label can live outside its card and be referenced by aria-labelledby or
+   * SVG <use>. Invalidate the cards that depend on the changed id as well as
+   * the card containing the mutation itself.
+   */
+  function queueReferencedCards(node) {
+    var el = elementOf(node);
+    var id = "";
+
+    for (var p = el; p && p !== document.documentElement; p = p.parentElement) {
+      if (p.getAttribute) {
+        id = p.getAttribute("id") || "";
+        if (id) break;
+      }
+    }
+    if (!id) return;
+
+    var labelledEls = document.querySelectorAll("[aria-labelledby]");
+    for (var i = 0; i < labelledEls.length; i++) {
+      var labelledBy = labelledEls[i].getAttribute("aria-labelledby") || "";
+      var ids = labelledBy.split(/\s+/);
+      for (var a = 0; a < ids.length; a++) {
+        if (ids[a] === id) {
+          queueDirtyCard(labelledEls[i]);
+          break;
+        }
+      }
+    }
+
+    var uses = document.querySelectorAll("use");
+    for (var u = 0; u < uses.length; u++) {
+      var href = uses[u].getAttribute("xlink:href") || uses[u].getAttribute("href") || "";
+      if (href === "#" + id) queueDirtyCard(uses[u]);
+    }
+  }
+
+  function sidebarOf(node) {
+    var el = elementOf(node);
+    return el && el.closest ? el.closest('div[role="complementary"]') : null;
+  }
+
+  function markSidebarDirty(node) {
+    if (!sidebarOf(node)) return false;
+    sidebarDirty = true;
+    return true;
+  }
+
+  /** Resolve a sidebar signal to its item, without hiding the whole rail. */
+  function sidebarContainerOf(node) {
+    var el = elementOf(node);
+    var sidebar = sidebarOf(el);
+    if (!sidebar) return null;
+
+    var item = el.closest('div[data-visualcompletion="ignore-dynamic"], [role="article"], [role="listitem"]');
+    if (item && item !== sidebar) return item;
+
+    var best = el;
+    var cur = el.parentElement;
+    for (var i = 0; i < 12 && cur && cur !== sidebar; i++, cur = cur.parentElement) {
+      var r = cur.getBoundingClientRect ? cur.getBoundingClientRect() : null;
+      if (!r) continue;
+      if (r.width >= 160 && r.width <= 700 && r.height >= 40 && r.height <= 1000) best = cur;
+    }
+    return best === sidebar ? null : best;
+  }
+
+  function hideSidebarItem(signal, reason) {
+    var item = sidebarContainerOf(signal);
+    if (!item) return false;
+
+    try {
+      var r = item.getBoundingClientRect();
+      if (r.width < 120 || r.height < 20 || r.width > 720 || r.height > 1100) return false;
+    } catch (_) {
+      return false;
+    }
+
+    item.setAttribute("data-abp-ad-marker", "true");
+    return hide(item, reason);
   }
 
   /* ------------------------------------------------------------------ *
@@ -372,18 +492,34 @@
 
   var diag = { candidates: 0, measured: 0, near: 0, sample: "" };
 
-  function findLabels() {
+  function elementsWithin(root, selector) {
+    var out = [];
+    var scope = root || document;
+
+    try {
+      if (scope.nodeType === 1 && scope.matches && scope.matches(selector)) out.push(scope);
+    } catch (_) {}
+
+    var descendants = scope.querySelectorAll ? scope.querySelectorAll(selector) : [];
+    for (var i = 0; i < descendants.length; i++) out.push(descendants[i]);
+    return out;
+  }
+
+  function findLabels(root) {
     var results = [];
-    var els = document.querySelectorAll("span, a, div[aria-label], div[aria-labelledby]");
+    var local = !!root;
+    var els = elementsWithin(root, "span, a, div[aria-label], div[aria-labelledby]");
     var vh = window.innerHeight || 900;
     var work = 0;
+    var start = local ? 0 : Math.min(labelCursor, els.length);
+    var i = start;
 
     diag.candidates = 0;
     diag.measured = 0;
 
-    for (var i = 0; i < els.length && work < BUDGET; i++) {
+    for (; i < els.length && work < BUDGET; i++) {
       var e = els[i];
-      if (seen.has(e) || e.__abpHidden) continue;
+      if ((!local && seen.has(e)) || e.__abpHidden) continue;
 
       // FAST PATH 1: Skip large structural elements immediately without layout reflow
       if (e.childElementCount > 35) continue;
@@ -401,20 +537,20 @@
       if (!hasUse && !aria && !hasLabelledBy) {
         var rawLen = raw.length;
         if (rawLen === 0 || rawLen > 65) {
-          seen.add(e);
+          if (!local) seen.add(e);
           continue;
         }
 
         // FAST PATH 3: Text heuristic check (Skip non-matching text without getBoundingClientRect)
         if (rawLen > 32 && !HINT.test(raw)) {
-          seen.add(e);
+          if (!local) seen.add(e);
           continue;
         }
       }
 
       // FAST PATH 4: Skip elements inside comment panels, dialogs, form elements, textboxes, or post message bodies
       if (e.closest && e.closest('[role="dialog"], [role="textbox"], [contenteditable="true"], form, [data-ad-preview="message"], [data-ad-comet-preview="message"], [data-ad-rendering-role="story_message"], [aria-label*="Comment" i], [aria-label*="تعليق" i]')) {
-        seen.add(e);
+        if (!local) seen.add(e);
         continue;
       }
 
@@ -428,7 +564,7 @@
       if (r.right < 0 || r.left < -1000) continue;
 
       diag.candidates++;
-      seen.add(e);
+      if (!local) seen.add(e);
       work++;
       diag.measured++;
 
@@ -454,6 +590,8 @@
       }
     }
 
+    if (!local) labelCursor = i >= els.length ? 0 : i;
+
     mark("ready", {
       "fb-scan": diag.candidates + "/" + diag.measured + "/" + diag.near,
       "fb-near": diag.sample || "none"
@@ -467,10 +605,11 @@
    * ------------------------------------------------------------------ */
 
   /** Direct fast sweeper for outbound ad redirect links and ad preferences */
-  function sweepDirectAdLinks() {
+  function sweepDirectAdLinks(root) {
     if (!S.adBlock || !S.fbSponsored) return;
-    var adLinks = document.querySelectorAll('a[href*="/ads/about"], a[href*="facebook.com/ads/about"], a[href*="/about/ads"], a[href*="facebook.com/about/ads"], a[href*="/about_this_ad"], a[href*="/ad_preferences/"], a[href*="facebook.com/ad_preferences"]');
-    for (var i = 0; i < adLinks.length && i < 30; i++) {
+    var local = !!root;
+    var adLinks = elementsWithin(root, 'a[href*="/ads/about"], a[href*="facebook.com/ads/about"], a[href*="/about/ads"], a[href*="facebook.com/about/ads"], a[href*="/about_this_ad"], a[href*="/ad_preferences/"], a[href*="facebook.com/ad_preferences"]');
+    for (var i = 0; i < adLinks.length && (local || i < 30); i++) {
       var card = postContainerOf(adLinks[i]);
       if (card) {
         var cr = card.getBoundingClientRect();
@@ -480,23 +619,104 @@
     }
   }
 
+  /**
+   * Reviewed adaptation of the current uBlock Origin Facebook quick fixes.
+   * uBO's raw rules use procedural selectors and response scriptlets; this
+   * module keeps only high-confidence DOM signals that can be expressed safely
+   * in the existing card-hiding pipeline.
+   */
+  function sweepSidebarAds() {
+    if (!S.adBlock || !S.fbSponsored || !S.fbSidebar) return;
+
+    var sidebar = document.querySelector('div[role="complementary"]');
+    if (!sidebar) return;
+
+    function hasAll(value, parts) {
+      var text = String(value || "").toLowerCase();
+      for (var i = 0; i < parts.length; i++) {
+        if (text.indexOf(parts[i]) === -1) return false;
+      }
+      return true;
+    }
+
+    // Quick Fixes: attribution/campaign links and the right-rail ad target.
+    var links = sidebar.querySelectorAll('a[attributionsrc], a[target="_blank"][role="link"]');
+    for (var i = 0; i < links.length; i++) {
+      var link = links[i];
+      var attribution = link.getAttribute("attributionsrc") || "";
+      var href = link.getAttribute("href") || "";
+      var rel = link.getAttribute("rel") || "";
+      var target = link.getAttribute("target") || "";
+      var role = link.getAttribute("role") || "";
+      var isAttributionAd = attribution.indexOf("/privacy_sandbox/comet/register/") === 0 &&
+                            attribution.indexOf("?eid=") !== -1;
+      var isCampaignAd = href.indexOf("fbclid") !== -1 && hasAll(href, [
+        "utm_medium", "utm_source", "utm_id", "utm_content", "utm_term", "utm_campaign"
+      ]);
+      var isRightRailTarget = target === "rhcad2" && hasAll(rel, ["nofollow", "noreferrer", "noopener"]);
+      var isImageAttribution = !!(attribution && href.indexOf("http") === 0 &&
+        target === "_blank" && role === "link" &&
+        rel.toLowerCase().indexOf("noreferrer") !== -1 &&
+        link.querySelector && link.querySelector("img[src]"));
+
+      if (isAttributionAd || isCampaignAd || isRightRailTarget || isImageAttribution) {
+        hideSidebarItem(link, "sidebar-ad-link");
+      }
+    }
+
+    // Quick Fixes: the current Comet right-rail ARIA label shape. Resolve the
+    // label text as well, so an organic link with a similar attribute is safe.
+    var labelled = sidebar.querySelectorAll("[aria-labelledby]");
+    for (var a = 0; a < labelled.length; a++) {
+      var labelledEl = labelled[a];
+      var labelledBy = labelledEl.getAttribute("aria-labelledby") || "";
+      var ariaRel = labelledEl.getAttribute("rel") || "";
+      var isCometAdLink = /^_r_/i.test(labelledBy.trim()) && hasAll(ariaRel, ["nofollow", "noreferrer", "tag"]);
+      var labelledText = readLabel(labelledEl);
+      if (isCometAdLink || (labelledText && matchesAny(labelledText, SPONSORED))) {
+        hideSidebarItem(labelledEl, "sidebar-aria-ad");
+      }
+    }
+
+    // Quick Fixes: a compact Sponsored heading in the right rail.
+    var sponsoredHeadings = sidebar.querySelectorAll("h3 span");
+    for (var h = 0; h < sponsoredHeadings.length; h++) {
+      var headingText = readLabel(sponsoredHeadings[h]);
+      if (headingText && matchesAny(headingText, SPONSORED)) {
+        hideSidebarItem(sponsoredHeadings[h], "sidebar-sponsored-heading");
+      }
+    }
+  }
+
   /** Dedicated fast sweeper for aria-labelledby remote ad disclosure chips (Live FB Comet 2026) */
-  function sweepAriaLabelledAds() {
+  function sweepAriaLabelledAds(root) {
     if (!S.adBlock || !S.fbSponsored) return;
-    var main = document.querySelector('div[role="main"]') || document.body;
-    var labelledEls = main.querySelectorAll('[aria-labelledby]');
-    for (var i = 0; i < labelledEls.length && i < 30; i++) {
+    var local = !!root;
+    var main = root || document.querySelector('div[role="main"]') || document.body;
+    var labelledEls = elementsWithin(main, '[aria-labelledby]');
+    var start = local ? 0 : Math.min(ariaCursor, labelledEls.length);
+    var i = start;
+    var end = local ? labelledEls.length : Math.min(labelledEls.length, start + SPECIAL_BATCH);
+
+    for (; i < end; i++) {
       var el = labelledEls[i];
       if (el.__abpHidden) continue;
       if (el.closest && (el.closest('[role="navigation"], nav, header') || el.closest('[style*="-10000"]'))) continue;
 
       var refId = el.getAttribute("aria-labelledby");
       if (!refId) continue;
-      var refEl = document.getElementById(refId);
-      if (!refEl) continue;
 
-      var refTxt = norm(refEl.textContent || refEl.innerText || "");
-      if (refTxt && matchesAny(refTxt, SPONSORED)) {
+      var refTxt = "";
+      var ids = refId.split(/\s+/);
+      for (var a = 0; a < ids.length; a++) {
+        if (!ids[a]) continue;
+        var refEl = document.getElementById(ids[a]);
+        if (refEl) refTxt += " " + (refEl.textContent || refEl.innerText || "");
+      }
+      refTxt = norm(refTxt);
+      if (!refTxt) continue;
+
+      if (matchesAny(refTxt, SPONSORED)) {
         el.setAttribute("data-abp-ad-marker", "true");
         var card = postContainerOf(el);
         if (card) {
@@ -506,15 +726,24 @@
         }
       }
     }
+
+    if (!local) ariaCursor = i >= labelledEls.length ? 0 : i;
   }
 
   /** Dedicated sweeper for SVG <use> based ad disclosure chips */
-  function sweepSvgAds() {
+  function sweepSvgAds(root) {
     if (!S.adBlock || !S.fbSponsored) return;
-    var main = document.querySelector('div[role="main"]') || document.body;
-    var uses = main.querySelectorAll('svg use[*|href^="#"], svg use[href^="#"]');
-    for (var i = 0; i < uses.length && i < 40; i++) {
+    var local = !!root;
+    var main = root || document.querySelector('div[role="main"]') || document.body;
+    var uses = elementsWithin(main, "use");
+    var start = local ? 0 : Math.min(svgCursor, uses.length);
+    var i = start;
+    var end = local ? uses.length : Math.min(uses.length, start + SPECIAL_BATCH);
+
+    for (; i < end; i++) {
       var u = uses[i];
+      var href = u.getAttribute("xlink:href") || u.getAttribute("href") || "";
+      if (href.charAt(0) !== "#") continue;
       if (u.closest && u.closest('[style*="-10000"]')) continue;
       var card = postContainerOf(u);
       if (!card) continue;
@@ -528,6 +757,8 @@
         hide(card, "sponsored-svg");
       }
     }
+
+    if (!local) svgCursor = i >= uses.length ? 0 : i;
   }
 
   /**
@@ -536,8 +767,8 @@
    * and referencing <svg> with height: 1px, causing timestamps to shrink into invisible 0-width dots.
    * This restores normal visual dimensions for all organic timestamps (Arabic & English).
    */
-  function restoreSvgTimestamps() {
-    var texts = document.querySelectorAll('text[textLength="0"], text[y="-3"]');
+  function restoreSvgTimestamps(root) {
+    var texts = elementsWithin(root, 'text[textLength="0"], text[y="-3"]');
     for (var i = 0; i < texts.length; i++) {
       var t = texts[i];
       var raw = (t.textContent || "").trim();
@@ -549,17 +780,17 @@
       t.setAttribute("y", "12");
     }
 
-    var svgs = document.querySelectorAll('div[role="main"] a svg[style*="height: 1px"]');
+    var svgs = elementsWithin(root, 'a svg[style*="height: 1px"]');
     for (var s = 0; s < svgs.length; s++) {
       svgs[s].style.setProperty("height", "14px", "important");
     }
   }
 
-  function sweepLabels() {
+  function sweepLabels(root) {
     if (!S.adBlock) return;
     if (!S.fbSponsored && !S.fbSuggested) return;
 
-    var found = findLabels();
+    var found = findLabels(root);
 
     for (var i = 0; i < found.length; i++) {
       var hit = found[i];
@@ -591,12 +822,43 @@
     }
   }
 
+  /** Re-evaluate every detector against one card without consulting `seen`. */
+  function scanCard(card) {
+    if (!card) return;
+
+    try {
+      var marker = card.getAttribute && card.getAttribute("data-abp-ad-marker") === "true" ? card :
+                   (card.querySelector && card.querySelector('[data-abp-ad-marker="true"]'));
+      if (marker && !card.hasAttribute("data-abp-blocked")) hide(card, "known-marker");
+    } catch (_) {}
+
+    try { sweepDirectAdLinks(card); } catch (_) {}
+    try { sweepAriaLabelledAds(card); } catch (_) {}
+    try { sweepSvgAds(card); } catch (_) {}
+    try { restoreSvgTimestamps(card); } catch (_) {}
+    try { sweepLabels(card); } catch (_) {}
+    try { sweepReels(card); } catch (_) {}
+    try { sweepReelAds(card); } catch (_) {}
+  }
+
+  function scanDirtyCards() {
+    if (!dirtyCards.length) return;
+
+    var cards = dirtyCards;
+    dirtyCards = [];
+    for (var i = 0; i < cards.length; i++) {
+      dirtyCardSet.delete(cards[i]);
+      scanCard(cards[i]);
+    }
+  }
+
   /** Remove the Reels shelf from the feed if requested */
-  function sweepReels() {
+  function sweepReels(root) {
     if (!S.adBlock || !S.fbReels) return;
 
-    var links = document.querySelectorAll('a[href*="/reel/"]');
-    for (var i = 0; i < links.length && i < 20; i++) {
+    var local = !!root;
+    var links = elementsWithin(root, 'a[href*="/reel/"]');
+    for (var i = 0; i < links.length && (local || i < 20); i++) {
       var shelf = postContainerOf(links[i]);
       if (shelf) hide(shelf, "reels");
     }
@@ -630,21 +892,24 @@
   }
 
   /** Dedicated Scoped Sweeper for Facebook Reels ads (Zero global reflow) */
-  function sweepReelAds() {
+  function sweepReelAds(root) {
     if (!S.adBlock || (!S.fbSponsored && !S.fbSuggested)) return;
+    var local = !!root;
+    var scope = root || document;
+    var reelHints = 'div[aria-label*="Reel" i], div[aria-label*="ريلز" i], div[data-pagelet*="Reel" i], a[href*="/reel/"]';
     var isReelsPage = (window.location && window.location.pathname.indexOf("/reel") !== -1) ||
-                      Boolean(document.querySelector('div[aria-label*="Reel" i], div[aria-label*="ريلز" i], div[data-pagelet*="Reel" i], a[href*="/reel/"]'));
+                      Boolean(elementsWithin(scope, reelHints).length);
     if (!isReelsPage) return;
 
     var candidates = [];
-    var videos = document.querySelectorAll('div[role="main"] video, video');
-    for (var v = 0; v < videos.length && v < 15; v++) {
+    var videos = elementsWithin(scope, 'div[role="main"] video, video');
+    for (var v = 0; v < videos.length && (local || v < 15); v++) {
       var rc = reelCardOf(videos[v]);
       if (rc && candidates.indexOf(rc) === -1) candidates.push(rc);
     }
 
-    var legacyCards = document.querySelectorAll('div[aria-label*="Reel" i], div[aria-label*="ريلز" i], div[data-pagelet*="Reel" i]');
-    for (var lc = 0; lc < legacyCards.length && lc < 10; lc++) {
+    var legacyCards = elementsWithin(scope, 'div[aria-label*="Reel" i], div[aria-label*="ريلز" i], div[data-pagelet*="Reel" i]');
+    for (var lc = 0; lc < legacyCards.length && (local || lc < 10); lc++) {
       if (candidates.indexOf(legacyCards[lc]) === -1) candidates.push(legacyCards[lc]);
     }
 
@@ -743,30 +1008,40 @@
     }
   }
 
-  function sweep() {
+  function sweep(runGlobal) {
     pending = false;
 
-    // Fast-path: Re-hide any known ad markers instantly (bypasses 'seen' cache)
-    try {
-      var markers = document.querySelectorAll('[data-abp-ad-marker="true"]');
-      for (var i = 0; i < markers.length; i++) {
-        var card = postContainerOf(markers[i]);
-        if (card && !card.hasAttribute("data-abp-blocked")) {
-          hide(card, "known-marker");
-        }
-      }
-    } catch (_) {}
+    scanDirtyCards();
 
-    try { sweepDirectAdLinks(); } catch (_) {}
-    try { sweepAriaLabelledAds(); } catch (_) {}
-    try { sweepSvgAds(); } catch (_) {}
-    try { restoreSvgTimestamps(); } catch (_) {}
-    try { sweepLabels(); } catch (_) {}
-    try { sweepReels(); } catch (_) {}
-    try { sweepReelAds(); } catch (_) {}
+    if (sidebarDirty || runGlobal) {
+      sidebarDirty = false;
+      try { sweepSidebarAds(); } catch (_) {}
+    }
+
+    if (runGlobal) {
+      // Fast-path: Re-hide any known ad markers instantly (bypasses 'seen' cache)
+      try {
+        var markers = document.querySelectorAll('[data-abp-ad-marker="true"]');
+        for (var i = 0; i < markers.length; i++) {
+          var card = postContainerOf(markers[i]);
+          if (card && !card.hasAttribute("data-abp-blocked")) {
+            hide(card, "known-marker");
+          }
+        }
+      } catch (_) {}
+
+      try { sweepDirectAdLinks(); } catch (_) {}
+      try { sweepAriaLabelledAds(); } catch (_) {}
+      try { sweepSvgAds(); } catch (_) {}
+      try { restoreSvgTimestamps(); } catch (_) {}
+      try { sweepLabels(); } catch (_) {}
+      try { sweepReels(); } catch (_) {}
+      try { sweepReelAds(); } catch (_) {}
+    }
   }
 
-  function schedule(force) {
+  function schedule(force, includeGlobal) {
+    if (includeGlobal) globalSweepPending = true;
     if (pending) return;
     pending = true;
 
@@ -775,14 +1050,16 @@
     var delay = force ? 0 : Math.max(0, MIN_SWEEP_GAP - elapsed);
 
     setTimeout(function () {
+      var runGlobal = globalSweepPending;
+      globalSweepPending = false;
       if (window.requestAnimationFrame) {
         requestAnimationFrame(function () {
           lastSweepTime = Date.now();
-          sweep();
+          sweep(runGlobal);
         });
       } else {
         lastSweepTime = Date.now();
-        sweep();
+        sweep(runGlobal);
       }
     }, delay);
   }
@@ -792,10 +1069,10 @@
    * ------------------------------------------------------------------ */
 
   function isVideoMutation(mutation) {
-    var t = mutation.target;
+    var t = elementOf(mutation.target);
     if (!t) return false;
     var tag = t.tagName;
-    if (tag === "VIDEO" || tag === "CANVAS" || tag === "SVG" || tag === "PATH") return true;
+    if (tag === "VIDEO" || tag === "CANVAS") return true;
     if (t.closest && t.closest('video, [role="progressbar"], [aria-label*="Play" i], [aria-label*="Pause" i], [aria-label*="Mute" i]')) {
       return true;
     }
@@ -810,32 +1087,50 @@
     style.textContent = '[data-abp-blocked] { display: none !important; height: 0 !important; min-height: 0 !important; max-height: 0 !important; margin: 0 !important; padding: 0 !important; visibility: hidden !important; border: 0 !important; pointer-events: none !important; overflow: hidden !important; }';
     if (document.head) document.head.appendChild(style);
     
-    sweep();
+    sweep(true);
 
     var observer = new MutationObserver(function (mutations) {
       var structuralChange = false;
       for (var m = 0; m < mutations.length; m++) {
         var mut = mutations[m];
-        
+
+        markSidebarDirty(mut.target);
+
         // Fast ignore for video/audio playback progress to prevent 60fps layout thrashing
-        var t = mut.target;
-        if (t) {
-            var tag = t.tagName;
-            if (tag === "VIDEO" || tag === "CANVAS" || tag === "SVG" || tag === "PATH") continue;
-            if (t.closest && t.closest('video, [role="progressbar"], [aria-label*="Play" i], [aria-label*="Pause" i], [aria-label*="Mute" i]')) continue;
-        }
+        if (isVideoMutation(mut)) continue;
 
         structuralChange = true;
-        
-        // Invalidate the 'seen' cache for any mutated elements so they are re-scanned
-        if (t) {
-            seen.delete(t);
-            if (t.parentElement) seen.delete(t.parentElement);
+
+        var t = mut.target;
+        var targetCard = queueDirtyCard(t);
+        if (!targetCard) queueReferencedCards(t);
+
+        // Added/removed nodes can be the card itself, a hydrated header, or a
+        // referenced ARIA/SVG label that lives outside the card.
+        var added = mut.addedNodes || [];
+        for (var a = 0; a < added.length; a++) {
+          markSidebarDirty(added[a]);
+          var addedCard = queueDirtyCard(added[a]);
+          if (!addedCard) queueReferencedCards(added[a]);
+        }
+        var removed = mut.removedNodes || [];
+        for (var r = 0; r < removed.length; r++) {
+          // Removed nodes no longer have a card ancestor; their id may still
+          // be referenced by a live card, so retain the dependency lookup.
+          queueReferencedCards(removed[r]);
+        }
+
+        // Keep the existing cheap invalidation for the global fast path. The
+        // card queue above is what makes externally referenced labels correct.
+        var targetEl = elementOf(t);
+        if (targetEl) {
+          seen.delete(targetEl);
+          if (targetEl.parentElement) seen.delete(targetEl.parentElement);
         }
       }
-      
+
       if (structuralChange) {
-        schedule(false);
+        schedule(false, false);
       }
     });
 
@@ -843,7 +1138,7 @@
       childList: true,
       subtree: true,
       attributes: true,
-      attributeFilter: ['aria-label', 'aria-labelledby', 'href', 'style', 'class'],
+      attributeFilter: ['aria-label', 'aria-labelledby', 'href', 'xlink:href', 'id', 'title', 'style', 'class', 'role', 'data-pagelet', 'data-testid', 'textLength', 'y'],
       characterData: true
     });
 
@@ -854,17 +1149,17 @@
       scrollScheduled = true;
       setTimeout(function () {
         scrollScheduled = false;
-        schedule(false);
+        schedule(false, true);
       }, 80);
     }
 
     window.addEventListener("scroll", onScrollPassive, { passive: true, capture: true });
     window.addEventListener("wheel", onScrollPassive, { passive: true, capture: true });
 
-    // Periodic lightweight refresh for lazily hydrated GraphQL feed items
+    // Periodic bounded refresh for lazy content. The rotating cursors advance
+    // through the document; this does not reset `seen` or restart at item 0.
     setInterval(function () {
-      seen = new WeakSet();
-      schedule(false);
+      schedule(false, true);
     }, 2500);
   }
 
@@ -889,7 +1184,7 @@
     chrome.storage.onChanged.addListener(function (changes) {
       for (var k in changes) if (k in S) S[k] = changes[k].newValue;
       seen = new WeakSet();
-      schedule(true);
+      schedule(true, true);
     });
   } catch (_) {}
 
