@@ -69,6 +69,11 @@
   var lastSweepTime = 0;
   var MIN_SWEEP_GAP = 80;        // ms throttle between sweeps
   var SPECIAL_BATCH = 64;        // bounded rotating work for global ARIA/SVG discovery
+  var retryQueue = [];           // nodes whose card could not be resolved yet (mid mount/fade-in)
+  var retryQueuedSet = new WeakSet();
+  var RETRY_MAX_ATTEMPTS = 5;    // ~500ms of coverage at RETRY_DELAY below
+  var RETRY_DELAY = 100;         // ms between insertion-retry passes
+  var retryTimer = null;
   /* ------------------------------------------------------------------ *
    * 2. DETECTION CORE INTEGRATION                                       *
    * ------------------------------------------------------------------ */
@@ -114,6 +119,7 @@
   var COLUMN_MIN = 240;    // narrower than this is a tiny widget
   var COLUMN_MAX = 1600;   // supports 1080p, 2K, 4K and full-width responsive feeds
   var POST_MIN_H = 100;
+  var DIRECT_CARD_SELECTOR = 'div[role="article"], div[data-pagelet*="FeedUnit"], div[aria-posinset]';
 
   function postContainerOf(el) {
     if (!el) return null;
@@ -129,7 +135,7 @@
     }
 
     // 1. Direct semantic container match if available
-    var directCard = el.closest('div[role="article"], div[data-pagelet*="FeedUnit"], div[aria-posinset]');
+    var directCard = el.closest(DIRECT_CARD_SELECTOR);
     if (directCard && !hiddenBox(directCard)) {
       return directCard;
     }
@@ -161,6 +167,26 @@
     return node.nodeType === 1 ? node : node.parentElement || null;
   }
 
+  /**
+   * Native, zero-polling alternative to the rotating global sweep. Instead of
+   * waiting for a bounded cursor to eventually reach a card's position in a
+   * long feed (the old primary path — 2.5s interval, 64-item ARIA/SVG
+   * batches, 1200-element label budget), ask the browser to tell us the
+   * moment a card comes within reach of the viewport. The generous
+   * rootMargin below fires well BEFORE the user actually scrolls to it, so
+   * detection has a head start instead of racing the user's eyes.
+   */
+  var cardObserver = (typeof IntersectionObserver !== "undefined") ? new IntersectionObserver(function (entries) {
+    for (var i = 0; i < entries.length; i++) {
+      if (entries[i].isIntersecting) scanCard(entries[i].target);
+    }
+  }, { rootMargin: "800px 0px 1600px 0px", threshold: 0 }) : null;
+
+  function observeCard(card) {
+    if (!cardObserver || !card) return;
+    try { cardObserver.observe(card); } catch (_) {}
+  }
+
   /** Queue the nearest feed card for a mutation-local re-evaluation. */
   function queueDirtyCard(node) {
     var el = elementOf(node);
@@ -170,11 +196,64 @@
     var card = postContainerOf(el);
     if (!card) return null;
 
+    observeCard(card);
+
     if (!dirtyCardSet.has(card)) {
       dirtyCardSet.add(card);
       dirtyCards.push(card);
     }
     return card;
+  }
+
+  /**
+   * postContainerOf() rejects any ancestor caught mid fade-in/mount
+   * (display:none / visibility:hidden / opacity:0 — see hiddenBox() inside
+   * postContainerOf). A freshly inserted ad card is routinely in exactly that
+   * state at the instant its childList mutation fires, so queueDirtyCard()
+   * returns null and the card would otherwise fall all the way through to the
+   * slow rotating global sweep (multi-second delay) before anything looks at
+   * it again.
+   *
+   * This retries resolution a few times, a beat apart, so the fast
+   * budget-free dirty-card path (the same one a user click lands on) still
+   * catches it once the transition settles — instead of waiting on the
+   * rotating ARIA/SVG/label cursors.
+   */
+  function queueInsertionRetry(el) {
+    if (!el || el.nodeType !== 1 || retryQueuedSet.has(el)) return;
+    retryQueuedSet.add(el);
+    retryQueue.push({ el: el, attempts: 0 });
+    if (!retryTimer) retryTimer = setTimeout(processRetryQueue, RETRY_DELAY);
+  }
+
+  function processRetryQueue() {
+    retryTimer = null;
+    if (!retryQueue.length) return;
+
+    var remaining = [];
+    var resolvedAny = false;
+
+    for (var i = 0; i < retryQueue.length; i++) {
+      var item = retryQueue[i];
+      retryQueuedSet.delete(item.el);
+
+      var card = queueDirtyCard(item.el);
+      if (card) {
+        resolvedAny = true;
+        continue;
+      }
+
+      item.attempts++;
+      if (item.attempts < RETRY_MAX_ATTEMPTS) {
+        retryQueuedSet.add(item.el);
+        remaining.push(item);
+      }
+    }
+
+    retryQueue = remaining;
+
+    if (resolvedAny) schedule(true, false);
+    if (retryQueue.length) retryTimer = setTimeout(processRetryQueue, RETRY_DELAY);
   }
 
   /**
@@ -409,6 +488,13 @@
                  (el.closest && el.closest('[aria-label*="Reel" i], [aria-label*="ريلز" i], [data-pagelet*="Reel" i]'));
 
     el.setAttribute("data-abp-blocked", reason);
+
+    // Once hidden there is nothing left for the intersection observer to
+    // react to; stop tracking it to keep the observed set bounded over a
+    // long scrolling session. Reels are re-validated separately by
+    // sweepReelAds()/revalidateReel(), not by this observer, so this is safe
+    // for them too.
+    if (cardObserver) { try { cardObserver.unobserve(el); } catch (_) {} }
 
     // Record which creative this node was hidden for, so revalidateReel() can
     // tell a recycled node apart from one still showing the same ad.
@@ -1052,14 +1138,36 @@
     setTimeout(function () {
       var runGlobal = globalSweepPending;
       globalSweepPending = false;
-      if (window.requestAnimationFrame) {
-        requestAnimationFrame(function () {
-          lastSweepTime = Date.now();
-          sweep(runGlobal);
-        });
-      } else {
+
+      function run() {
         lastSweepTime = Date.now();
         sweep(runGlobal);
+      }
+
+      // requestAnimationFrame is fully SUSPENDED (not just throttled) while the
+      // tab is not the visible one — Chrome never fires it for a backgrounded
+      // page. Wrapping every sweep in rAF unconditionally means `pending`
+      // (set above) never gets cleared until the tab regains focus, silently
+      // freezing the ENTIRE detection pipeline (dirty cards, retries, the
+      // periodic global sweep) for as long as the user is looking at another
+      // tab/window — confirmed live: an ad stayed unhidden for as long as the
+      // Facebook tab stayed backgrounded, then vanished the instant it
+      // regained focus.
+      //
+      // document.hidden alone is NOT enough: it only flips when the TAB is
+      // inactive or the WINDOW is minimized. Alt-Tabbing to a different
+      // top-level application (Chrome's window stays open, unminimized, and
+      // still the active tab within it) leaves document.hidden === false,
+      // yet Chrome still suspends rAF for the occluded/unfocused window on
+      // Windows — confirmed live: an ad stayed queued the entire time another
+      // app had focus, and only vanished the instant a real click landed
+      // inside the Facebook page (which forces a direct, non-rAF run via the
+      // mutation it causes). document.hasFocus() catches this case: it goes
+      // false the moment OS focus leaves the window, independent of hidden.
+      if (document.hidden || !document.hasFocus() || !window.requestAnimationFrame) {
+        run();
+      } else {
+        requestAnimationFrame(run);
       }
     }, delay);
   }
@@ -1086,7 +1194,15 @@
     var style = document.createElement("style");
     style.textContent = '[data-abp-blocked] { display: none !important; height: 0 !important; min-height: 0 !important; max-height: 0 !important; margin: 0 !important; padding: 0 !important; visibility: hidden !important; border: 0 !important; pointer-events: none !important; overflow: hidden !important; }';
     if (document.head) document.head.appendChild(style);
-    
+
+    // Register every card already in the DOM at boot for intersection-driven
+    // re-checking. Cards added later are picked up by the MutationObserver
+    // below; these predate it, so they need a one-time initial registration.
+    try {
+      var bootCards = document.querySelectorAll(DIRECT_CARD_SELECTOR);
+      for (var bc = 0; bc < bootCards.length; bc++) observeCard(bootCards[bc]);
+    } catch (_) {}
+
     sweep(true);
 
     var observer = new MutationObserver(function (mutations) {
@@ -1111,7 +1227,21 @@
         for (var a = 0; a < added.length; a++) {
           markSidebarDirty(added[a]);
           var addedCard = queueDirtyCard(added[a]);
-          if (!addedCard) queueReferencedCards(added[a]);
+          if (!addedCard) {
+            queueReferencedCards(added[a]);
+            queueInsertionRetry(elementOf(added[a]));
+          }
+
+          // A single mutation can bulk-insert a wrapper containing several
+          // feed cards at once (e.g. a page of virtualized content mounting
+          // together). queueDirtyCard above only resolves ONE card from the
+          // mutation target; register every card-shaped descendant too so
+          // none of them wait on the rotating global sweep to be discovered.
+          var addedEl = elementOf(added[a]);
+          if (addedEl && addedEl.querySelectorAll) {
+            var innerCards = addedEl.querySelectorAll(DIRECT_CARD_SELECTOR);
+            for (var ic = 0; ic < innerCards.length; ic++) observeCard(innerCards[ic]);
+          }
         }
         var removed = mut.removedNodes || [];
         for (var r = 0; r < removed.length; r++) {
@@ -1161,6 +1291,51 @@
     setInterval(function () {
       schedule(false, true);
     }, 2500);
+
+    // Force an immediate, full sweep the instant the tab regains focus. While
+    // it was backgrounded, timers ran throttled (or, previously, rAF did not
+    // run at all — see schedule()) so anything that mutated off-screen may
+    // not have been evaluated yet. Without this the user can catch a brief
+    // flash of an ad that was already queued but never got to run.
+    document.addEventListener("visibilitychange", function () {
+      if (!document.hidden) schedule(true, true);
+    });
+
+    // Covers the Alt-Tab case above: OS focus can return without document.hidden
+    // ever having changed (the tab stayed "active" in its own window the whole
+    // time), so visibilitychange never fires. window focus is the correct,
+    // independent signal for that transition.
+    window.addEventListener("focus", function () {
+      schedule(true, true);
+    });
+
+    // Network-layer early warning from fb-net-probe.js (MAIN world): fires the
+    // instant a SponsoredData story is observed in a GraphQL response (fetch
+    // or XHR), often before Facebook has finished rendering it. Forces an
+    // immediate sweep instead of waiting for the MutationObserver/rotating
+    // cycle to notice the card after it appears. Read-only signal — no
+    // response data is ever modified for this transport.
+    document.addEventListener("__abpSponsoredDetected", function () {
+      schedule(true, true);
+    });
+
+    // Confirmed-certain signal from fb-net-probe.js (MAIN world): a closed
+    // shadow root's real, isolated text is an EXACT match for a known
+    // sponsorship-disclosure label ("Ad", "Sponsored", "إعلان", ...) — read
+    // directly through an attachShadow side-channel, bypassing every visual
+    // obfuscation layer entirely. This is what finally makes the ad type
+    // with no readable text and no DOM/network correlation detectable at
+    // all. Hide the enclosing card immediately; no heuristic guessing.
+    document.addEventListener("__abpShadowSponsoredDetected", function (e) {
+      try {
+        var prev = parseInt(document.documentElement.getAttribute("data-abp-shadow-signal-received") || "0", 10);
+        document.documentElement.setAttribute("data-abp-shadow-signal-received", String(prev + 1));
+      } catch (_) {}
+      try {
+        var card = e.target && e.target.closest ? e.target.closest(DIRECT_CARD_SELECTOR) : null;
+        if (card) hide(card, "shadow-dom-ad");
+      } catch (_) {}
+    });
   }
 
   function boot() {
