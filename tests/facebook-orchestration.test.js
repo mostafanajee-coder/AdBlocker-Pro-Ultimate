@@ -384,6 +384,10 @@ class FakeDocument extends FakeNode {
     walk(this);
     return found;
   }
+
+  addEventListener() {}
+  removeEventListener() {}
+  hasFocus() { return true; }
 }
 
 function styleFor(element) {
