@@ -247,7 +247,9 @@
     installStyle();
     try {
       win.chrome.storage.local.get(["adBlock", "igSponsored", "whitelist"], applySettings);
-      win.chrome.storage.onChanged.addListener(function () {
+      win.chrome.storage.onChanged.addListener(function (changes, area) {
+        if (area && area !== "local") return;
+        if (changes && !(changes.adBlock || changes.igSponsored || changes.whitelist)) return;
         win.chrome.storage.local.get(["adBlock", "igSponsored", "whitelist"], applySettings);
       });
     } catch (_) {

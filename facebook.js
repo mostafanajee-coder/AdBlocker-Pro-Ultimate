@@ -1356,8 +1356,19 @@
   }
 
   try {
-    chrome.storage.onChanged.addListener(function (changes) {
-      for (var k in changes) if (k in S) S[k] = changes[k].newValue;
+    // Only settings that affect detection matter here. background.js also
+    // writes the blocked-count stats (totalBlocked/todayBlocked/...) on every
+    // hide from ANY site, and reacting to those would wipe the memo cache and
+    // force a full re-sweep of every Facebook tab each time an ad is hidden
+    // anywhere — a self-feeding loop, since our own hides write those keys.
+    chrome.storage.onChanged.addListener(function (changes, area) {
+      if (area && area !== "local") return;
+      var relevant = false;
+      for (var k in changes) {
+        if (k in S) { S[k] = changes[k].newValue; relevant = true; }
+        else if (k === "whitelist") relevant = true;
+      }
+      if (!relevant) return;
       seen = new WeakSet();
       schedule(true, true);
     });

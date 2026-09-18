@@ -138,7 +138,9 @@
   function loadSettings() {
     try {
       chrome.storage.local.get(["adBlock", "ytSkip", "whitelist"], applySettings);
-      chrome.storage.onChanged.addListener(function () {
+      chrome.storage.onChanged.addListener(function (changes, area) {
+        if (area && area !== "local") return;
+        if (changes && !(changes.adBlock || changes.ytSkip || changes.whitelist)) return;
         chrome.storage.local.get(["adBlock", "ytSkip", "whitelist"], applySettings);
       });
     } catch (_) {

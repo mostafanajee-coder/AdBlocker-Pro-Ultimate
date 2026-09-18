@@ -359,7 +359,9 @@
   });
 
   // Initialization
-  chrome.storage.local.get(null, function (settings) {
+  // This runs in every frame of every page: read only what is used here
+  // instead of the whole store (filter reports, counters, custom rules...).
+  chrome.storage.local.get(["adBlock", "antiAdblock", "mouseUnlock", "whitelist", "cosmeticCss"], function (settings) {
     if (!settings) settings = {};
     var hostname = window.location.hostname;
     var wl = settings.whitelist || [];
