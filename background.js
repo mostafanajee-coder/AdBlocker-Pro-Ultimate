@@ -270,7 +270,10 @@ async function initializeExtension(existing) {
 }
 
 chrome.runtime.onInstalled.addListener(function () {
-  chrome.storage.local.get(null).then(initializeExtension).catch(function (e) {
+  // Rules saved by earlier versions are no longer applied anywhere; drop them.
+  chrome.storage.local.remove("customUserRules").catch(function () {}).then(function () {
+    return chrome.storage.local.get(null);
+  }).then(initializeExtension).catch(function (e) {
     console.warn("[AdBlockerPro] initialization failed:", e && e.message ? e.message : e);
   });
 });
@@ -407,12 +410,6 @@ chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
       mutateWhitelist("remove", msg.hostname).then(function (whitelist) {
         sendResponse({ whitelist });
       }).catch(function (e) { sendResponse({ error: e.message }); });
-      return true;
-
-    case "clearCustomRules":
-      chrome.storage.local.remove("customUserRules", function () {
-        sendResponse({ ok: true });
-      });
       return true;
   }
 

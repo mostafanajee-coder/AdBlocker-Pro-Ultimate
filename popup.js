@@ -11,7 +11,6 @@
       protectionPaused: "الحماية معطلة",
       todayBlocked: "إعلانات اليوم",
       totalBlocked: "إجمالي المحجوب",
-      elementZapper: "حجب عنصر",
       whitelistSite: "استثناء الموقع",
       removeWhitelist: "إلغاء الاستثناء",
       coreProtection: "الحماية الأساسية",
@@ -41,7 +40,6 @@
       updating: "جاري التحديث...",
       rulesActive: "قاعدة ديناميكية مفعلة",
       builtStat: "القواعد الثابتة مدمجة؛ حدّث لبناء القواعد الديناميكية",
-      zapperTitle: "انقر لاختيار وحجب أي عنصر في الصفحة",
       whitelistTitle: "استثناء الموقع الحالي من الحجب"
     },
     en: {
@@ -50,7 +48,6 @@
       protectionPaused: "Shield Paused",
       todayBlocked: "Blocked Today",
       totalBlocked: "Total Blocked",
-      elementZapper: "Element Zapper",
       whitelistSite: "Whitelist Site",
       removeWhitelist: "Remove Whitelist",
       coreProtection: "Core Protection",
@@ -80,7 +77,6 @@
       updating: "Updating...",
       rulesActive: "active dynamic rules",
       builtStat: "Bundled static rules active; update to build dynamic rules",
-      zapperTitle: "Click to select and hide any element",
       whitelistTitle: "Whitelist current site from blocking"
     }
   };
@@ -116,9 +112,6 @@
         el.textContent = t[key];
       }
     });
-
-    var zapperBtn = document.getElementById("zapperBtn");
-    if (zapperBtn) zapperBtn.title = t.zapperTitle;
 
     var wlBtn = document.getElementById("whitelistToggleBtn");
     if (wlBtn) wlBtn.title = t.whitelistTitle;
@@ -263,14 +256,6 @@
     // Language toggle button
     document.getElementById("langBtn").addEventListener("click", function () {
       applyLanguage(currentLang === "ar" ? "en" : "ar", true);
-    });
-
-    // Element Zapper Button
-    document.getElementById("zapperBtn").addEventListener("click", function () {
-      if (!currentTabId) return;
-      chrome.tabs.sendMessage(currentTabId, { type: "START_ELEMENT_ZAPPER" }, function () {
-        window.close(); // Close popup so user can click element directly
-      });
     });
 
     // Whitelist Drawer Toggle

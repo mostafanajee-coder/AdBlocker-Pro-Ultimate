@@ -64,36 +64,6 @@
     }
   }
 
-  // Apply custom rules defined by user via Element Zapper
-  function applyCustomUserRules() {
-    try {
-      chrome.storage.local.get("customUserRules", function (res) {
-        var allRules = (res && res.customUserRules) || {};
-        var host = window.location.hostname.toLowerCase();
-        var selectors = allRules[host] || [];
-
-        // Check parent domains
-        var parts = host.split(".");
-        for (var p = 0; p < parts.length - 1; p++) {
-          var parentHost = parts.slice(p).join(".");
-          if (allRules[parentHost] && Array.isArray(allRules[parentHost])) {
-            selectors = selectors.concat(allRules[parentHost]);
-          }
-        }
-
-        if (selectors.length === 0) return;
-        var existing = document.getElementById("abp-custom-user-css");
-        if (existing) existing.remove();
-
-        var style = document.createElement("style");
-        style.id = "abp-custom-user-css";
-        style.textContent = selectors.join(",\n") + " { display: none !important; }";
-        var root = getRoot();
-        if (root) root.appendChild(style);
-      });
-    } catch (_) {}
-  }
-
   // Neutralize invisible transparent click-traps layered over video players ONLY on streaming sites
   function defuseClickTraps() {
     try {
@@ -186,181 +156,9 @@
     }
   }
 
-  /* ---------------------------------------------------------------- *
-   * Interactive Element Zapper (حاجب العناصر التفاعلي)                *
-   * ---------------------------------------------------------------- */
-  var zapperActive = false;
-  var zapperOverlay = null;
-  var zapperBanner = null;
-  var lastTarget = null;
-
-  function buildUniqueSelector(el) {
-    if (!el || el === document.body || el === document.documentElement) return null;
-
-    if (el.id && !/\d{4,}/.test(el.id) && !/^[a-z0-9]{16,}$/i.test(el.id)) {
-      return "#" + CSS.escape(el.id);
-    }
-
-    var parts = [];
-    var cur = el;
-    while (cur && cur !== document.body && cur !== document.documentElement && parts.length < 4) {
-      var tag = cur.tagName.toLowerCase();
-      if (cur.id && !/\d{4,}/.test(cur.id)) {
-        parts.unshift("#" + CSS.escape(cur.id));
-        break;
-      }
-      var cls = Array.from(cur.classList).filter(function (c) {
-        return !c.startsWith("abp-") && !/^[a-z0-9]{12,}$/i.test(c);
-      });
-      if (cls.length > 0) {
-        parts.unshift(tag + "." + cls.slice(0, 2).map(CSS.escape).join("."));
-      } else {
-        var parent = cur.parentElement;
-        if (parent) {
-          var index = Array.from(parent.children).indexOf(cur) + 1;
-          parts.unshift(tag + ":nth-child(" + index + ")");
-        } else {
-          parts.unshift(tag);
-        }
-      }
-      cur = cur.parentElement;
-    }
-    return parts.join(" > ");
-  }
-
-  function showToast(msg) {
-    var toast = document.createElement("div");
-    toast.id = "abp-toast";
-    toast.textContent = msg;
-    toast.style.cssText = "position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#1a73e8;color:#fff;padding:10px 20px;border-radius:24px;font-size:13px;font-weight:600;z-index:2147483647;box-shadow:0 4px 12px rgba(0,0,0,0.25);pointer-events:none;transition:opacity 0.3s ease;";
-    document.body.appendChild(toast);
-    setTimeout(function () {
-      toast.style.opacity = "0";
-      setTimeout(function () { toast.remove(); }, 300);
-    }, 2200);
-  }
-
-  function startZapper() {
-    if (zapperActive) return;
-    zapperActive = true;
-
-    // Overlay outline box
-    zapperOverlay = document.createElement("div");
-    zapperOverlay.id = "abp-zapper-highlight";
-    zapperOverlay.style.cssText = "position:fixed;pointer-events:none;border:2px dashed #ff3366;background:rgba(255,51,102,0.18);z-index:2147483646;display:none;transition:all 0.04s ease;box-sizing:border-box;";
-    document.documentElement.appendChild(zapperOverlay);
-
-    var lang = "";
-    try {
-      if (typeof chrome !== "undefined" && chrome.i18n && typeof chrome.i18n.getUILanguage === "function") {
-        lang = chrome.i18n.getUILanguage();
-      }
-    } catch (_) {}
-    if (!lang && typeof navigator !== "undefined") {
-      lang = navigator.language || (navigator.languages && navigator.languages[0]) || "";
-    }
-    var isAr = (lang || "").toLowerCase().startsWith("ar");
-
-    // Top instruction banner
-    zapperBanner = document.createElement("div");
-    zapperBanner.id = "abp-zapper-banner";
-    zapperBanner.innerHTML = isAr
-      ? "⚡ <b>أداة حجب العناصر</b>: انقر على أي عنصر لإخفائه نهائياً | <b>ESC</b> للإلغاء"
-      : "⚡ <b>Element Zapper</b>: Click any element to hide permanently | Press <b>ESC</b> to cancel";
-    zapperBanner.style.cssText = "position:fixed;top:12px;left:50%;transform:translateX(-50%);background:rgba(20,20,30,0.92);color:#fff;padding:8px 18px;border-radius:30px;font-size:13px;font-family:sans-serif;z-index:2147483647;box-shadow:0 6px 20px rgba(0,0,0,0.4);border:1px solid rgba(255,255,255,0.15);backdrop-filter:blur(8px);cursor:default;";
-    document.documentElement.appendChild(zapperBanner);
-
-    document.addEventListener("mousemove", onZapperMouseMove, true);
-    document.addEventListener("click", onZapperClick, true);
-    document.addEventListener("keydown", onZapperKeyDown, true);
-  }
-
-  function stopZapper() {
-    zapperActive = false;
-    if (zapperOverlay) { zapperOverlay.remove(); zapperOverlay = null; }
-    if (zapperBanner) { zapperBanner.remove(); zapperBanner = null; }
-    document.removeEventListener("mousemove", onZapperMouseMove, true);
-    document.removeEventListener("click", onZapperClick, true);
-    document.removeEventListener("keydown", onZapperKeyDown, true);
-  }
-
-  function onZapperMouseMove(e) {
-    if (!zapperActive) return;
-    var target = document.elementFromPoint(e.clientX, e.clientY);
-    if (!target || target === zapperOverlay || target === zapperBanner || target === document.body || target === document.documentElement) {
-      if (zapperOverlay) zapperOverlay.style.display = "none";
-      return;
-    }
-    lastTarget = target;
-    var rect = target.getBoundingClientRect();
-    if (zapperOverlay) {
-      zapperOverlay.style.display = "block";
-      zapperOverlay.style.top = rect.top + "px";
-      zapperOverlay.style.left = rect.left + "px";
-      zapperOverlay.style.width = rect.width + "px";
-      zapperOverlay.style.height = rect.height + "px";
-    }
-  }
-
-  function onZapperClick(e) {
-    if (!zapperActive) return;
-    e.preventDefault();
-    e.stopPropagation();
-    e.stopImmediatePropagation();
-
-    if (lastTarget) {
-      var sel = buildUniqueSelector(lastTarget);
-      lastTarget.style.setProperty("display", "none", "important");
-
-      if (sel) {
-        var host = window.location.hostname.toLowerCase();
-        chrome.storage.local.get("customUserRules", function (res) {
-          var allRules = (res && res.customUserRules) || {};
-          if (!allRules[host]) allRules[host] = [];
-          if (allRules[host].indexOf(sel) === -1) {
-            allRules[host].push(sel);
-            chrome.storage.local.set({ customUserRules: allRules }, function () {
-              applyCustomUserRules();
-            });
-          }
-        });
-      }
-      var isArToast = (function () {
-        var l = (typeof chrome !== "undefined" && chrome.i18n && chrome.i18n.getUILanguage) ? chrome.i18n.getUILanguage() : (navigator.language || "");
-        return (l || "").toLowerCase().startsWith("ar");
-      })();
-      showToast(isArToast ? "✓ تم حجب العنصر وحفظ القاعدة بنجاح" : "✓ Element hidden permanently");
-    }
-    stopZapper();
-    return false;
-  }
-
-  function onZapperKeyDown(e) {
-    if (e.key === "Escape" || e.keyCode === 27) {
-      stopZapper();
-      var isArCancel = (function () {
-        var l = (typeof chrome !== "undefined" && chrome.i18n && chrome.i18n.getUILanguage) ? chrome.i18n.getUILanguage() : (navigator.language || "");
-        return (l || "").toLowerCase().startsWith("ar");
-      })();
-      showToast(isArCancel ? "تم إلغاء وضع الحجب" : "Element zapper cancelled");
-    }
-  }
-
-  // Runtime messaging
-  chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
-    if (msg && msg.type === "START_ELEMENT_ZAPPER") {
-      startZapper();
-      sendResponse({ ok: true });
-    } else if (msg && msg.type === "CLEAR_CUSTOM_RULES") {
-      var existing = document.getElementById("abp-custom-user-css");
-      if (existing) existing.remove();
-      sendResponse({ ok: true });
-    }
-  });
-
   // Initialization
   // This runs in every frame of every page: read only what is used here
-  // instead of the whole store (filter reports, counters, custom rules...).
+  // instead of the whole store (filter reports, counters...).
   chrome.storage.local.get(["adBlock", "antiAdblock", "mouseUnlock", "whitelist", "cosmeticCss"], function (settings) {
     if (!settings) settings = {};
     var hostname = window.location.hostname;
@@ -368,7 +166,6 @@
     if (isWhitelisted(hostname, wl)) return;
 
     applyCosmeticFilters(settings);
-    applyCustomUserRules();
     applyMouseUnlock(settings);
 
     if (isStreamingSite(hostname)) {

@@ -469,8 +469,24 @@
     } catch (_) {}
   }
 
+  // Failsafe for every hide path: an ad card never legitimately contains the
+  // page's main landmark or feed. If a container climb ever resolves to a
+  // layout wrapper, hiding it would blank the whole page, so refuse instead.
+  var structureRefused = new WeakSet();
+  function isPageStructure(el) {
+    if (structureRefused.has(el)) return true;
+    var bad = false;
+    try {
+      bad = !!(el.matches('[role="main"], [role="feed"], main') ||
+               el.querySelector('[role="main"], [role="feed"], main'));
+    } catch (_) {}
+    if (bad) structureRefused.add(el);
+    return bad;
+  }
+
   function hide(el, reason) {
     if (!el) return false;
+    if (isPageStructure(el)) return false;
 
     var alreadyHidden = el.hasAttribute("data-abp-blocked");
 

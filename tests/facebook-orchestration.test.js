@@ -859,6 +859,24 @@ section("10. Current uBlock Quick Fix sidebar signals hide only high-confidence 
   check("Sponsored sidebar heading hides its item", isBlocked(headingItem), true);
 });
 
+section("11. A card that wraps the page's main landmark is never hidden", () => {
+  const h = createHarness();
+  const wrapper = card(h);
+  const innerMain = h.doc.createElement("div");
+  innerMain.setAttribute("role", "main");
+  wrapper.append(innerMain, h.doc.createElement("span").append(text(h, "Sponsored")));
+  h.main.appendChild(wrapper);
+  h.mutate({ type: "childList", target: h.main, addedNodes: [wrapper] });
+  check("card containing the main landmark is refused", isBlocked(wrapper), false);
+
+  const control = createHarness();
+  const ad = card(control);
+  ad.appendChild(control.doc.createElement("span").append(text(control, "Sponsored")));
+  control.main.appendChild(ad);
+  control.mutate({ type: "childList", target: control.main, addedNodes: [ad] });
+  check("ordinary sponsored card is still hidden", isBlocked(ad), true);
+});
+
 console.log(`\n${"=".repeat(64)}`);
 console.log(`  ${passed} passed, ${failed} failed`);
 console.log(`${"=".repeat(64)}`);

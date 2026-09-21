@@ -5,7 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Speed](https://img.shields.io/badge/Performance-Zero--Overhead-orange.svg)](#)
 
-A high-performance, lightweight Manifest V3 ad blocker engineered for modern Chromium browsers. Designed with surgical precision, featuring native declarative network filtering, intelligent Facebook & Instagram sponsored-post detection, YouTube Zero-Latency instant playback with kickstart auto-play, Twitter / X promoted tweet annihilation, interactive Element Zapper, in-player popunder disarming, and undetectable anti-adblock evasion.
+A high-performance, lightweight Manifest V3 ad blocker engineered for modern Chromium browsers. Designed with surgical precision, featuring native declarative network filtering, intelligent Facebook & Instagram sponsored-post detection, YouTube Zero-Latency instant playback with kickstart auto-play, Twitter / X promoted tweet annihilation, in-player popunder disarming, and undetectable anti-adblock evasion.
 
 ---
 
@@ -24,7 +24,6 @@ This maintenance build focuses on filter-source quality and Manifest V3 quota ef
 | **Facebook & Reels** | Broken by DOM obfuscation & black screens | **Visual Coordinate Reconstruction + Recycled-Node Guard** |
 | **Instagram Ads** | Sponsored posts clutter feed | **Surgical Multi-lingual Sponsored Label Detection & Stories Auto-Skip** |
 | **Twitter / X Ads** | Promoted tweets clutter timeline | **Native Mutation-Shielded Promoted Tweet Slayer** |
-| **Element Zapper** | Third-party dependencies or missing | **Interactive 1-Click Element Picker & Custom Rules** |
 | **User Interface** | Fixed basic layout | **Modern Glassmorphic UI with Dark/Light & Bilingual (AR/EN)** |
 | **Video Popunders** | Intrusive new tabs on click | **Capture-Phase Click Interceptor & Auto-Closer** |
 
@@ -79,23 +78,16 @@ Detects and neutralizes sponsored posts, stories, and reels across Instagram:
 * **Story & Reel Auto-Advance**: Seamlessly skips sponsored stories without user intervention.
 * **Zero Overhead**: Throttled mutation scanning with microtask batching and zero permanent polling loops.
 
-### 7. ⚡ Interactive Element Zapper & Custom Rules
-Built directly into the extension popup and content engine:
-* **1-Click Element Picker**: Click any annoying banner or overlay on any web page with real-time highlighted bounding box preview.
-* **CSS Selector Generation**: Automatically builds unique, robust CSS selectors for the selected element.
-* **Persistent Local Rules**: Rules are stored in `chrome.storage.local` per domain, automatically applying upon future visits.
-* **Safe Cancellation**: Press `ESC` at any time to exit Zapper mode without changes.
-
-### 8. 🎭 Smart Redirect Resources (Anti-Adblock Defuser)
+### 7. 🎭 Smart Redirect Resources (Anti-Adblock Defuser)
 Instead of failing network requests with errors, matching tracker and ad script requests are redirected to neutral stub assets in `web_accessible_resources/` (e.g. `googlesyndication_adsbygoogle.js`, `google-ima.js`, `amazon_ads.js`, `noop.js`, `1x1.gif`). Sites believe the ad script loaded normally, eliminating *"Please disable your AdBlocker"* warnings.
 
-### 9. 🛑 In-Player Popunder & Click-Trap Neutralizer (`popclose.js`)
+### 8. 🛑 In-Player Popunder & Click-Trap Neutralizer (`popclose.js`)
 Movie and anime streaming platforms deploy transparent overlays (`div[style*="z-index"]`, `<a target="_blank">`) directly over video players to spawn popunder advertising tabs upon clicking "Play".
 * **Capture-Phase Click Interruption**: Catches and dissolves transparent clickjacking links before page event listeners can fire.
 * **In-Iframe `window.open` Disarmer**: Drops rogue popunder requests initiated within embedded video players (`iframe`).
 * **Smart Popclose Neutralizer**: Automatically checks and terminates rogue ad landing tabs from within the newly opened window.
 
-### 10. 🎨 Modern Glassmorphic UI with Auto-Language Matching
+### 9. 🎨 Modern Glassmorphic UI with Auto-Language Matching
 * **360px Spacious Layout**: Designed with modern frosted glass (`backdrop-filter: blur(16px)`), luminous accents, and smooth switches.
 * **Dark & Light Themes**: Instant toggle with automatic local storage persistence.
 * **Automatic Browser Language Matching**: Matches the browser UI language automatically (`chrome.i18n.getUILanguage()`), rendering Arabic (RTL) for Arabic browsers and English (LTR) for English/other browsers, with instant manual toggle.
@@ -108,7 +100,7 @@ Movie and anime streaming platforms deploy transparent overlays (`div[style*="z-
 ```
 ├── manifest.json              # Extension Manifest V3 configuration
 ├── background.js              # Background Service Worker & DNR rule managers
-├── content.js                 # Global cosmetic styling, Zapper engine & popunder disarmer
+├── content.js                 # Global cosmetic styling & popunder disarmer
 ├── twitter.js                 # Twitter / X promoted tweet & trend slayer
 ├── facebook.js                # Facebook feed observer and DOM scraper
 ├── fb-detect.js               # Facebook visual coordinate detection engine
