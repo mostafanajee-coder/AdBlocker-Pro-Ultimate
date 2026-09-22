@@ -877,6 +877,56 @@ section("11. A card that wraps the page's main landmark is never hidden", () => 
   check("ordinary sponsored card is still hidden", isBlocked(ad), true);
 });
 
+section("12. A sponsored Reel that cannot be auto-skipped is restored instead of left black", () => {
+  const h = createHarness();
+  h.window.location.pathname = "/reel/1";
+
+  const adReel = card(h);
+  adReel.rect = { left: 0, top: 0, width: 400, height: 800 };
+  adReel.setAttribute("data-pagelet", "ReelViewerRoot");
+
+  const video = h.doc.createElement("video");
+  video.pause = function () { video.__paused = true; };
+  video.play = function () { video.__played = true; };
+  video.muted = false;
+  adReel.appendChild(video);
+
+  const badge = h.doc.createElement("span");
+  badge.appendChild(text(h, "Sponsored"));
+  adReel.appendChild(badge);
+
+  h.main.appendChild(adReel);
+  h.scheduler.tickInterval();
+
+  // The fake scheduler runs every queued callback instantly regardless of
+  // its real delay, so hide() and its 700ms-later verification would both
+  // fire within a single flush(). Stop as soon as hide() has actually run
+  // (mid-state, before the verification callback) so the two can be
+  // inspected separately, the same way they are seconds apart for real.
+  let guard = 0;
+  while (!isBlocked(adReel) && h.scheduler.queue.length && guard++ < 20) {
+    h.scheduler.queue.shift()();
+  }
+
+  check("sponsored reel is hidden and its video paused/muted", isBlocked(adReel), true);
+  check("video paused while hidden", video.__paused, true);
+  check("video muted while hidden", video.muted, true);
+
+  // Facebook's own full-screen player kept rendering the video regardless of
+  // our collapse — simulated here by leaving adReel.rect exactly as it was
+  // instead of shrinking it the way a genuinely successful skip would.
+  h.scheduler.flush();
+  check("skip verification restores visibility after it fails", isBlocked(adReel), false);
+  check("video is un-muted back to its original state", video.muted, false);
+  check("video playback is resumed instead of staying frozen black", video.__played, true);
+
+  // The same still-visible creative must not be re-hidden and re-flashed on
+  // the next sweep — only a recycled node with a different reel wins that back.
+  h.scheduler.tickInterval();
+  h.scheduler.flush();
+  check("the same ad creative is not immediately re-hidden (no black flash loop)", isBlocked(adReel), false);
+});
+
 console.log(`\n${"=".repeat(64)}`);
 console.log(`  ${passed} passed, ${failed} failed`);
 console.log(`${"=".repeat(64)}`);

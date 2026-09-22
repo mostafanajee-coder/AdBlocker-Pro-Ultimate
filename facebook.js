@@ -373,16 +373,7 @@
    * inside hide() makes it unreachable, because hide() is never called for a
    * node that is already hidden.
    */
-  function revalidateReel(el) {
-    if (!el || !el.__abpHidden || !el.__abpReelId) return;
-
-    var id = getReelId(el);
-    if (!id || id === el.__abpReelId) return;   // same creative — still an ad
-
-    el.__abpHidden = false;
-    el.__abpReelId = id;
-    el.removeAttribute("data-abp-blocked");
-    el.removeAttribute("data-abp-size");
+  function clearReelHideStyles(el) {
     el.style.removeProperty("display");
     el.style.removeProperty("height");
     el.style.removeProperty("min-height");
@@ -395,8 +386,13 @@
     el.style.removeProperty("pointer-events");
     el.style.removeProperty("scroll-snap-align");
     el.style.removeProperty("scroll-snap-stop");
+  }
 
-    // Restore the audio state we captured when this node was hidden.
+  // Restores the audio state captured when this node was hidden. `resume`
+  // additionally resumes playback — used only when we are giving up on
+  // hiding this exact creative (see abandonReelHide below), not when a
+  // recycled node has simply moved on to different, still-untouched content.
+  function restoreReelVideoState(el, resume) {
     try {
       var vids = el.querySelectorAll("video");
       for (var v = 0; v < vids.length; v++) {
@@ -404,14 +400,72 @@
           vids[v].muted = vids[v].__abpPrevMuted;
           delete vids[v].__abpPrevMuted;
         }
+        if (resume && vids[v].play) { try { vids[v].play(); } catch (_) {} }
       }
     } catch (_) {}
+  }
+
+  function revalidateReel(el) {
+    if (!el || !el.__abpHidden || !el.__abpReelId) return;
+
+    var id = getReelId(el);
+    if (!id || id === el.__abpReelId) return;   // same creative — still an ad
+
+    el.__abpHidden = false;
+    el.__abpReelId = id;
+    el.__abpReelSkipFailed = false; // different creative now — worth trying again
+    el.removeAttribute("data-abp-blocked");
+    el.removeAttribute("data-abp-size");
+    clearReelHideStyles(el);
+    restoreReelVideoState(el, false);
 
     if (blocked > 0) {
       blocked--;
       mark("ready", { "fb-blocked": blocked });
       report();
     }
+  }
+
+  /**
+   * Facebook's Reels viewer appears to render the active video in a
+   * persistent full-screen layer independent of the virtualized "slide" node
+   * we resolve as the ad's container (reelCardOf()) — collapsing that node
+   * and pausing its <video> can silently fail to remove anything from the
+   * screen, leaving a frozen, paused (black) video with the like/comment/
+   * share chrome still floating on top of it, since that chrome belongs to
+   * the persistent player, not to the node we hid. advanceReelIfActive()'s
+   * button-click/synthetic-key/scroll attempts are the only way to actually
+   * move the user off that slide; when none of them work within a short
+   * window, a permanently blacked-out reel is strictly worse than just
+   * showing the ad, so give up and resume normal playback instead.
+   */
+  function abandonReelHide(el) {
+    el.__abpHidden = false;
+    el.__abpReelSkipFailed = true; // do not retry THIS creative again
+    el.removeAttribute("data-abp-blocked");
+    el.removeAttribute("data-abp-size");
+    clearReelHideStyles(el);
+    restoreReelVideoState(el, true);
+
+    if (blocked > 0) {
+      blocked--;
+      mark("ready", { "fb-blocked": blocked });
+      report();
+    }
+  }
+
+  function scheduleReelSkipVerification(el) {
+    setTimeout(function () {
+      try {
+        if (!el.__abpHidden || !document.contains(el)) return; // restored or removed already
+        var r = el.getBoundingClientRect();
+        var vh = window.innerHeight || 900;
+        // height check matters: a genuinely collapsed (display:none, height:0)
+        // node can still satisfy a bare top/bottom range check at zero size.
+        var stillVisible = r.height > 50 && r.top < vh * 0.6 && r.bottom > vh * 0.4;
+        if (stillVisible) abandonReelHide(el);
+      } catch (_) {}
+    }, 700);
   }
 
   function findReelScroller(el) {
@@ -561,6 +615,7 @@
       el.style.setProperty("scroll-snap-align", "none", "important");
       el.style.setProperty("scroll-snap-stop", "normal", "important");
       advanceReelIfActive(el);
+      scheduleReelSkipVerification(el);
     } else {
       el.style.setProperty("display", "none", "important");
       el.style.setProperty("height", "0", "important");
@@ -1024,6 +1079,7 @@
       revalidateReel(card);
 
       if (card.__abpHidden) continue;
+      if (card.__abpReelSkipFailed) continue;
 
       // POSITIVE TEST: A real Reels slide ALWAYS contains a <video>. Comment drawers, forms, and dialogs do NOT.
       if (!card.querySelector("video")) continue;
