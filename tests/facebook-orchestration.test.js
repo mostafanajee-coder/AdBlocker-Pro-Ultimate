@@ -927,6 +927,54 @@ section("12. A sponsored Reel that cannot be auto-skipped is restored instead of
   check("the same ad creative is not immediately re-hidden (no black flash loop)", isBlocked(adReel), false);
 });
 
+section("13. Leaving the Reels route restores any reel still hidden, instead of leaving a black gap behind", () => {
+  const h = createHarness();
+  h.window.location.pathname = "/reel/1";
+  // start() captured its route-tracking baseline synchronously during
+  // createHarness() itself, before this line ran, back when the harness's
+  // default pathname ("/") was still in effect — sync it up explicitly so
+  // the transition below is measured from "/reel/1", the same as it would
+  // be for a real page that starts out already on a Reels URL.
+  h.scheduler.tickInterval(1);
+
+  const adReel = card(h);
+  adReel.rect = { left: 0, top: 0, width: 400, height: 800 };
+  adReel.setAttribute("data-pagelet", "ReelViewerRoot");
+
+  const video = h.doc.createElement("video");
+  video.pause = function () { video.__paused = true; };
+  video.play = function () { video.__played = true; };
+  video.muted = false;
+  adReel.appendChild(video);
+
+  const badge = h.doc.createElement("span");
+  badge.appendChild(text(h, "Sponsored"));
+  adReel.appendChild(badge);
+
+  h.main.appendChild(adReel);
+  h.scheduler.tickInterval(0); // periodic global sweep -> detects + hides the ad
+
+  let guard = 0;
+  while (!isBlocked(adReel) && h.scheduler.queue.length && guard++ < 20) {
+    h.scheduler.queue.shift()();
+  }
+  check("ad reel is hidden while still on the Reels route", isBlocked(adReel), true);
+
+  // User presses X / Esc / back before the ~700ms skip-verification timer
+  // (still sitting in the queue) ever gets a chance to run.
+  h.window.location.pathname = "/";
+  h.scheduler.tickInterval(1); // checkReelsRouteExit
+
+  check("leaving the Reels route restores it immediately", isBlocked(adReel), false);
+  check("video playback resumes instead of staying frozen black", video.__played, true);
+  check("video is un-muted back to its original state", video.muted, false);
+
+  // The now-stale skip-verification callback for this same node is still
+  // queued; it must be a no-op rather than double-fire cleanup logic or crash.
+  h.scheduler.flush();
+  check("the stale skip-verification callback is a harmless no-op", isBlocked(adReel), false);
+});
+
 console.log(`\n${"=".repeat(64)}`);
 console.log(`  ${passed} passed, ${failed} failed`);
 console.log(`${"=".repeat(64)}`);

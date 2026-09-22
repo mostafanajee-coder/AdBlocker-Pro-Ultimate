@@ -74,6 +74,10 @@
   var RETRY_MAX_ATTEMPTS = 5;    // ~500ms of coverage at RETRY_DELAY below
   var RETRY_DELAY = 100;         // ms between insertion-retry passes
   var retryTimer = null;
+  // Every node currently hidden via the Reels path (isReel branch of hide()),
+  // so a route change out of Reels can restore all of them unconditionally —
+  // see restoreAllReelHides() below.
+  var hiddenReelNodes = new Set();
   /* ------------------------------------------------------------------ *
    * 2. DETECTION CORE INTEGRATION                                       *
    * ------------------------------------------------------------------ */
@@ -414,6 +418,7 @@
     el.__abpHidden = false;
     el.__abpReelId = id;
     el.__abpReelSkipFailed = false; // different creative now — worth trying again
+    hiddenReelNodes.delete(el);
     el.removeAttribute("data-abp-blocked");
     el.removeAttribute("data-abp-size");
     clearReelHideStyles(el);
@@ -442,6 +447,7 @@
   function abandonReelHide(el) {
     el.__abpHidden = false;
     el.__abpReelSkipFailed = true; // do not retry THIS creative again
+    hiddenReelNodes.delete(el);
     el.removeAttribute("data-abp-blocked");
     el.removeAttribute("data-abp-size");
     clearReelHideStyles(el);
@@ -452,6 +458,36 @@
       mark("ready", { "fb-blocked": blocked });
       report();
     }
+  }
+
+  /**
+   * Facebook's Comet router swaps routes without a full page reload, and
+   * appears to sometimes recycle a DOM node we hid while inside the Reels
+   * viewer into unrelated content once the user leaves it (via the X close
+   * button, Esc, or browser back) — nothing else in this file ever revisits
+   * a node once __abpHidden is true, so a recycled node stays permanently
+   * blacked out with no trigger to reconsider it. The moment the pathname
+   * shows we are no longer in Reels at all, there is no legitimate reason
+   * to keep any in-flight Reels hide active, so give all of them back
+   * unconditionally rather than risk leaking a stale hide onto new content.
+   */
+  function restoreAllReelHides() {
+    if (!hiddenReelNodes.size) return;
+    var nodes = Array.from(hiddenReelNodes);
+    hiddenReelNodes.clear();
+    for (var i = 0; i < nodes.length; i++) {
+      var el = nodes[i];
+      try {
+        el.__abpHidden = false;
+        el.removeAttribute("data-abp-blocked");
+        el.removeAttribute("data-abp-size");
+        clearReelHideStyles(el);
+        restoreReelVideoState(el, true);
+        if (blocked > 0) blocked--;
+      } catch (_) {}
+    }
+    mark("ready", { "fb-blocked": blocked });
+    report();
   }
 
   function scheduleReelSkipVerification(el) {
@@ -614,6 +650,7 @@
       el.style.setProperty("pointer-events", "none", "important");
       el.style.setProperty("scroll-snap-align", "none", "important");
       el.style.setProperty("scroll-snap-stop", "normal", "important");
+      hiddenReelNodes.add(el);
       advanceReelIfActive(el);
       scheduleReelSkipVerification(el);
     } else {
@@ -1363,6 +1400,29 @@
     setInterval(function () {
       schedule(false, true);
     }, 2500);
+
+    // Facebook's Comet router is a single-page app: leaving the Reels viewer
+    // (X button, Esc, browser back) never reloads the document, so nothing
+    // else here notices the route changed. Polled rather than hooked via
+    // history.pushState/replaceState: those run in the page's MAIN-world
+    // JS context, and a content script's isolated world only shares the DOM
+    // with it, not the History prototype — overriding it here would not see
+    // Facebook's own navigation calls at all (confirmed pattern elsewhere in
+    // this codebase, see fb-net-probe.js's document.hidden override, which
+    // only ever affects that same MAIN world). location.pathname itself is
+    // live DOM/browser state, not a per-world JS object, so reading it here
+    // is reliable regardless of which world changed it.
+    var lastReelsPathname = (window.location && window.location.pathname) || "";
+    function checkReelsRouteExit() {
+      var path = (window.location && window.location.pathname) || "";
+      if (path === lastReelsPathname) return;
+      var wasReels = lastReelsPathname.indexOf("/reel") !== -1;
+      var isReels = path.indexOf("/reel") !== -1;
+      lastReelsPathname = path;
+      if (wasReels && !isReels) restoreAllReelHides();
+    }
+    setInterval(checkReelsRouteExit, 400);
+    window.addEventListener("popstate", checkReelsRouteExit);
 
     // Force an immediate, full sweep the instant the tab regains focus. While
     // it was backgrounded, timers ran throttled (or, previously, rAF did not
