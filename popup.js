@@ -26,7 +26,9 @@
       ytSkip: "يوتيوب (YouTube)",
       ytSkipDesc: "تخطي الإعلانات الفوري وبدء التشغيل التلقائي",
       fbSponsored: "فيسبوك (Facebook)",
-      fbSponsoredDesc: "حجب المنشورات الممولة والريلز بدون تقطيع",
+      fbSponsoredDesc: "حجب المنشورات الممولة والريلز الممولة فقط",
+      fbReels: "إخفاء الريلز بالكامل",
+      fbReelsDesc: "يخفي كل الريلز — العضوية والممولة معًا، لمن لا يريد رؤية الريلز إطلاقًا",
       twitterBlock: "إكس / تويتر (X)",
       twitterBlockDesc: "حجب التغريدات والمنشورات الممولة (مُروّج)",
       igSponsored: "إنستغرام (Instagram)",
@@ -63,7 +65,9 @@
       ytSkip: "YouTube",
       ytSkipDesc: "Instant skip & zero-pause kickstart",
       fbSponsored: "Facebook",
-      fbSponsoredDesc: "Zero-overhead sponsored & reels filter",
+      fbSponsoredDesc: "Blocks sponsored posts & sponsored Reels only",
+      fbReels: "Hide all Reels",
+      fbReelsDesc: "Hides every Reel — organic and sponsored alike, for anyone who wants Reels gone entirely",
       twitterBlock: "Twitter / X",
       twitterBlockDesc: "Slay promoted tweets & sponsored ads",
       igSponsored: "Instagram",
@@ -318,7 +322,7 @@
     // Bind settings toggles
     [
       "adBlock", "strictTracking", "antiAdblock", "mouseUnlock",
-      "ytSkip", "fbSponsored", "twitterBlock", "igSponsored", "useFilterLists"
+      "ytSkip", "fbSponsored", "fbReels", "twitterBlock", "igSponsored", "useFilterLists"
     ].forEach(function (k) { bindToggle(k, k); });
 
     // Load active tab info
@@ -338,7 +342,7 @@
         // Set switches
         [
           "adBlock", "strictTracking", "antiAdblock", "mouseUnlock",
-          "ytSkip", "fbSponsored", "twitterBlock", "igSponsored", "useFilterLists"
+          "ytSkip", "fbSponsored", "fbReels", "twitterBlock", "igSponsored", "useFilterLists"
         ].forEach(function (k) {
           var box = document.getElementById(k);
           if (box) box.checked = settings[k] === true;
