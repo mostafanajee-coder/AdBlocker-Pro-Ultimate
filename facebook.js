@@ -1689,7 +1689,7 @@
 
   function boot() {
     try {
-      chrome.storage.local.get(null, function (cfg) {
+      chrome.storage.local.get(Object.keys(S).concat(["whitelist"]), function (cfg) {
         if (cfg) for (var k in S) if (cfg[k] !== undefined) S[k] = cfg[k];
 
         var wl = (cfg && cfg.whitelist) || [];

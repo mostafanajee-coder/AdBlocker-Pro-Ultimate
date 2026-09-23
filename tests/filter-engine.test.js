@@ -74,6 +74,40 @@ const arabic = FILTERS.SOURCES.find(s => s.id === 'arabic');
 check(easylist && easylist.network === false && easylist.cosmetic === true && easylist.bundledRuleset === 'easylist', 'EasyList runtime use is cosmetic-only because network rules are bundled');
 check(easyprivacy && easyprivacy.network === false && easyprivacy.bundledRuleset === 'easyprivacy', 'EasyPrivacy is not duplicated into dynamic network quota');
 check(arabic && arabic.network === true && arabic.enabled === true, 'regional Arabic list remains a dynamic network source');
+check(arabic && /Liste_AR\.txt$/.test(arabic.url) && !/filters\/25\.txt/.test(arabic.url), 'the Arabic source is Liste AR, not AdGuard Mail Tracking (filters/25.txt)');
+const adguardBase = FILTERS.SOURCES.find(s => s.id === 'adguard-base');
+check(adguardBase && adguardBase.enabled === true && adguardBase.network === false && adguardBase.cosmetic === true, 'AdGuard Base is a default cosmetic-only source');
+
+console.log('\nSite-specific cosmetic parsing\n------------------------------');
+const siteMap = new Map();
+FILTERS.parseSiteCosmetic([
+  'example.com##.sidebar-ad',
+  'example.com,news.example.org##div[id^="ad-slot"]',
+  'example.com#@#.ad-banner',
+  'example.com##.bad { background: url(https://evil.test/leak) }',
+  'example.com##div:has-text(Sponsored)',
+  'example.com#?#.procedural:has(> .x)',
+  'example.com#$#.css-injection { display: none }',
+  'example.com##+js(set-constant, x, 1)',
+  '~example.net##.negated-only',
+  'example.*##.entity-wildcard',
+  'facebook.com##div[role="feed"]',
+  'm.youtube.com##.yt-thing',
+  '##.generic-rule-not-site-specific',
+  '! comment##.not-a-rule'
+].join('\n'), siteMap);
+const ex = siteMap.get('example.com');
+check(ex && ex.h.has('.sidebar-ad') && ex.h.has('div[id^="ad-slot"]'), 'collects hiding rules per domain');
+check(siteMap.get('news.example.org') && siteMap.get('news.example.org').h.has('div[id^="ad-slot"]'), 'a rule listing several domains is stored under each');
+check(ex && ex.u.has('.ad-banner'), 'collects "#@#" exceptions separately');
+check(ex && ![...ex.h].some(s => s.includes('{')), 'rejects a selector containing braces (CSS injection)');
+check(ex && ![...ex.h].some(s => /has-text|procedural|css-injection|\+js/.test(s)), 'skips extended, procedural, CSS-injection and scriptlet syntax');
+check(!siteMap.has('example.net') && !siteMap.has('~example.net') && ![...siteMap.keys()].some(k => k.includes('*')), 'skips negated and wildcard domain lists instead of approximating them');
+check(!siteMap.has('facebook.com') && !siteMap.has('m.youtube.com'), 'leaves sites with dedicated modules (Facebook, YouTube, ...) to those modules');
+check(![...siteMap.keys()].some(k => !k.includes('.')), 'never stores a generic rule as a site rule');
+check(FILTERS.safeSelector('.ad') && !FILTERS.safeSelector('.a{}') && !FILTERS.safeSelector('.a/*x*/') && !FILTERS.safeSelector(''), 'safeSelector accepts plain selectors and rejects braces, comments and empty ones');
+check(!FILTERS.safeSelector('div:not(.x') && !FILTERS.safeSelector('a[href="x') && !FILTERS.safeSelector('div[id^="ad"') && !FILTERS.safeSelector('.a)'), 'rejects unbalanced brackets and quotes, which would swallow every later CSS rule');
+check(FILTERS.safeSelector('div:not(.x)') && FILTERS.safeSelector('a[href*="(ads)"]') && FILTERS.safeSelector('.a\\(b'), 'keeps balanced, quoted and escaped brackets');
 
 console.log('\nSource payload validation\n-------------------------');
 let valid = false;

@@ -26,14 +26,27 @@ check(background.includes('requestDomains: [domain]'), 'whitelist DNR rules cove
 check(background.includes('AD_RULESET_IDS') && background.includes('settings.adBlock !== false'), 'Ad Blocker toggle controls static ad rulesets');
 check(background.includes('const STRICT_TRACKING_RULESET_IDS = ["easyprivacy", "tracking"]'), 'Strict Tracking controls both EasyPrivacy and the extra tracking ruleset');
 const easyPrivacyResource = (manifest.declarative_net_request.rule_resources || []).find(r => r.id === 'easyprivacy');
-check(easyPrivacyResource && easyPrivacyResource.enabled === false, 'EasyPrivacy manifest default matches strictTracking=false');
+check(easyPrivacyResource && easyPrivacyResource.enabled === true, 'EasyPrivacy manifest default matches strictTracking=true');
+const trackingResource = (manifest.declarative_net_request.rule_resources || []).find(r => r.id === 'tracking');
+check(trackingResource && trackingResource.enabled === true, 'extra tracking ruleset is on by default too');
+check(background.includes('strictTracking: true,'), 'tracking protection is on by default');
+check(background.includes('patch.strictTracking = true') && background.includes('reason === "update"'), 'existing installs get tracking protection once, on update');
 const war = manifest.web_accessible_resources || [];
 check(war.length === 1 && Array.isArray(war[0].resources) && !war[0].resources.includes('web_accessible_resources/*'), 'web accessible resources are explicitly scoped instead of wildcarded');
 check(war[0].resources.length === 36, 'only the 36 redirect resources referenced by shipped rulesets are exposed');
-check(background.includes('filterLists: ["arabic", "easylist"]'), 'default dynamic list selection avoids duplicating bundled EasyPrivacy network rules');
+check(background.includes('filterLists: ["arabic", "easylist", "adguard-base"]'), 'default lists add AdGuard Base site hiding and still avoid duplicating bundled EasyPrivacy network rules');
+check(background.includes('chrome.storage.local.get(SETTING_KEYS)') && !background.includes('storage.local.get(null)'), 'background reads settings keys only, never the ~20k site-hiding entries');
 check(!popup.includes('300,000+'), 'popup no longer advertises a fictional 300,000+ active-rule count');
 check(twitter.includes('twitterBlock') && twitter.includes('whitelist') && twitter.includes('adBlock'), 'Twitter module follows toggle, whitelist, and global blocker state');
 check(popclose.includes('settings.adBlock === false') && popclose.includes('isWhitelisted'), 'popunder closer respects global blocker state and whitelist');
+check((manifest.permissions || []).includes('contextMenus'), 'right-click "Block this element" has its permission');
+{
+  const contentSrc = fs.readFileSync(path.join(__dirname, '..', 'content.js'), 'utf8');
+  const listMatch = /var BLOCK_EXCLUDED = (\[[\s\S]*?\]);/.exec(contentSrc);
+  const { FILTERS } = require('../filters.js');
+  const contentList = listMatch ? JSON.parse(listMatch[1].replace(/'/g, '"')) : null;
+  check(contentList && JSON.stringify(contentList) === JSON.stringify(FILTERS.SITE_COSMETIC_EXCLUDED), 'content.js never blocks on exactly the sites filters.js and background.js exclude');
+}
 check(manifest.minimum_chrome_version === '119', 'minimum Chrome version covers dynamic MAIN-world related-frame registration');
 
 console.log('\n' + '='.repeat(64));

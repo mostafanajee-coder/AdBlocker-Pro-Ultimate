@@ -2,7 +2,7 @@ importScripts("filters.js");
 
 const DEFAULTS = {
   adBlock: true,
-  strictTracking: false,
+  strictTracking: true,
   antiAdblock: false,
   mouseUnlock: false,
 
@@ -26,7 +26,7 @@ const DEFAULTS = {
 
   // ---- Filter lists ----
   useFilterLists: true,
-  filterLists: ["arabic", "easylist"],
+  filterLists: ["arabic", "easylist", "adguard-base"],
   filterReport: null,
   cosmeticCss: [],
 
@@ -88,8 +88,20 @@ function isWhitelisted(hostname, whitelist) {
   return false;
 }
 
+const SETTING_KEYS = Object.keys(DEFAULTS);
+
+// Settings are exactly the DEFAULTS keys. Storage also holds one
+// "cf:<domain>" entry per site for site-specific hiding (about 20,000,
+// ~2.5 MB), which must never be read, rewritten or sent as "settings".
+function readSettings() {
+  return chrome.storage.local.get(SETTING_KEYS);
+}
+
 function mergedSettings(data) {
-  const out = Object.assign({}, DEFAULTS, data || {});
+  const out = {};
+  for (const key of SETTING_KEYS) {
+    out[key] = data && data[key] !== undefined ? data[key] : DEFAULTS[key];
+  }
   out.whitelist = normalizeWhitelist(out.whitelist);
   return out;
 }
@@ -215,7 +227,7 @@ async function rebuildFilters(notify) {
   if (rebuilding) return { ok: false, error: "already running" };
   rebuilding = true;
   try {
-    const current = mergedSettings(await chrome.storage.local.get(null));
+    const current = mergedSettings(await readSettings());
     if (current.adBlock === false || current.useFilterLists === false) {
       return { ok: false, error: "filter lists are disabled" };
     }
@@ -252,7 +264,7 @@ try {
 
 chrome.alarms.onAlarm.addListener(function (alarm) {
   if (alarm.name !== "filterRefresh") return;
-  chrome.storage.local.get(null).then(function (data) {
+  readSettings().then(function (data) {
     const settings = mergedSettings(data);
     if (settings.adBlock !== false && settings.useFilterLists !== false) rebuildFilters(false);
   }).catch(function () {});
@@ -260,26 +272,133 @@ chrome.alarms.onAlarm.addListener(function (alarm) {
 
 async function initializeExtension(existing) {
   const settings = mergedSettings(existing);
-  await chrome.storage.local.set(settings);
+  await chrome.storage.local.set(settings); // DEFAULTS keys only (see mergedSettings)
   await syncRuntimeState(settings);
 
-  if (settings.adBlock !== false && settings.useFilterLists !== false && !settings.filterReport) {
+  // Also rebuild when the last report predates site-specific hiding, so an
+  // update takes effect now instead of at the next daily refresh.
+  const report = settings.filterReport;
+  if (settings.adBlock !== false && settings.useFilterLists !== false && (!report || !report.siteCosmetics)) {
     await rebuildFilters(false);
   }
   return settings;
 }
 
-chrome.runtime.onInstalled.addListener(function () {
+// Default changes that should reach existing installs once, not only new
+// ones. Applied on update and recorded, so a user who later turns a feature
+// back off keeps that choice.
+const DEFAULTS_REVISION_KEY = "defaultsRevision";
+const DEFAULTS_REVISION = 1;
+
+function defaultsMigrationPatch(reason, stored) {
+  if ((stored[DEFAULTS_REVISION_KEY] || 0) >= DEFAULTS_REVISION) return null;
+  const patch = { [DEFAULTS_REVISION_KEY]: DEFAULTS_REVISION };
+  if (reason === "update") {
+    // Revision 1: tracking protection on, and AdGuard Base site-specific hiding.
+    patch.strictTracking = true;
+    const lists = Array.isArray(stored.filterLists) ? stored.filterLists.slice() : DEFAULTS.filterLists.slice();
+    if (lists.indexOf("adguard-base") === -1) lists.push("adguard-base");
+    patch.filterLists = lists;
+  }
+  return patch;
+}
+
+/* ---------------------------------------------------------------- *
+ * Right-click "Block this element"                                  *
+ * ---------------------------------------------------------------- */
+
+const BLOCK_MENU_ID = "abp-block-element";
+
+// Never offered on the sites with dedicated modules (the same list the
+// site-specific hiding skips): a saved element rule applied to Facebook's
+// feed wrapper is what once blanked the whole feed.
+function isBlockMenuExcluded(url) {
+  try {
+    const u = new URL(url);
+    if (u.protocol !== "http:" && u.protocol !== "https:") return true;
+    return FILTERS.isSiteCosmeticExcluded(u.hostname.toLowerCase());
+  } catch (_) {
+    return true;
+  }
+}
+
+function installBlockMenu() {
+  if (!chrome.contextMenus) return;
+  let ar = false;
+  try { ar = String(chrome.i18n.getUILanguage() || "").toLowerCase().startsWith("ar"); } catch (_) {}
+  chrome.contextMenus.removeAll(function () {
+    chrome.contextMenus.create({
+      id: BLOCK_MENU_ID,
+      title: ar ? "حجب هذا العنصر" : "Block this element",
+      contexts: ["all"],
+      documentUrlPatterns: ["http://*/*", "https://*/*"]
+    }, function () {
+      void chrome.runtime.lastError;
+      syncBlockMenuForActiveTab();
+    });
+  });
+}
+
+// Chrome has no per-page "menu about to show" event, so the entry is hidden
+// while the active tab is one of the excluded sites. The click handler and
+// content.js both check again, since visibility can lag a navigation.
+function syncBlockMenuFor(url) {
+  if (!chrome.contextMenus) return;
+  chrome.contextMenus.update(BLOCK_MENU_ID, { visible: !isBlockMenuExcluded(url || "") }, function () {
+    void chrome.runtime.lastError;
+  });
+}
+
+function syncBlockMenuForActiveTab() {
+  chrome.tabs.query({ active: true, lastFocusedWindow: true }, function (tabs) {
+    if (tabs && tabs[0]) syncBlockMenuFor(tabs[0].url);
+  });
+}
+
+if (chrome.contextMenus) {
+  chrome.tabs.onActivated.addListener(syncBlockMenuForActiveTab);
+  chrome.tabs.onUpdated.addListener(function (tabId, change, tab) {
+    if (change.url && tab && tab.active) syncBlockMenuFor(change.url);
+  });
+  if (chrome.windows && chrome.windows.onFocusChanged) {
+    chrome.windows.onFocusChanged.addListener(syncBlockMenuForActiveTab);
+  }
+  chrome.contextMenus.onClicked.addListener(function (info, tab) {
+    if (info.menuItemId !== BLOCK_MENU_ID || !tab || tab.id === undefined || tab.id < 0) return;
+    // Both the page and the right-clicked frame: an embedded Facebook widget
+    // on another site is still Facebook.
+    if (isBlockMenuExcluded(info.pageUrl || tab.url || "")) return;
+    if (info.frameUrl && isBlockMenuExcluded(info.frameUrl)) return;
+    const options = typeof info.frameId === "number" ? { frameId: info.frameId } : {};
+    try {
+      chrome.tabs.sendMessage(tab.id, { type: "ABP_BLOCK_ELEMENT" }, options, function () {
+        void chrome.runtime.lastError;
+      });
+    } catch (_) {}
+  });
+}
+
+chrome.runtime.onInstalled.addListener(function (details) {
+  const reason = details && details.reason;
+  installBlockMenu();
   // Rules saved by earlier versions are no longer applied anywhere; drop them.
   chrome.storage.local.remove("customUserRules").catch(function () {}).then(function () {
-    return chrome.storage.local.get(null);
-  }).then(initializeExtension).catch(function (e) {
+    return chrome.storage.local.get(SETTING_KEYS.concat([DEFAULTS_REVISION_KEY]));
+  }).then(async function (stored) {
+    const patch = defaultsMigrationPatch(reason, stored);
+    if (patch) {
+      await chrome.storage.local.set(patch);
+      Object.assign(stored, patch);
+    }
+    return initializeExtension(stored);
+  }).catch(function (e) {
     console.warn("[AdBlockerPro] initialization failed:", e && e.message ? e.message : e);
   });
 });
 
 chrome.runtime.onStartup.addListener(function () {
-  chrome.storage.local.get(null).then(function (data) {
+  installBlockMenu();
+  readSettings().then(function (data) {
     return syncRuntimeState(mergedSettings(data));
   }).catch(function (e) {
     console.warn("[AdBlockerPro] startup sync failed:", e && e.message ? e.message : e);
@@ -288,7 +407,7 @@ chrome.runtime.onStartup.addListener(function () {
 
 /* Keep session whitelist rules and registered MAIN-world scripts correct after
  * a service-worker restart as well, not only after a full browser restart. */
-chrome.storage.local.get(null).then(function (data) {
+readSettings().then(function (data) {
   return syncRuntimeState(mergedSettings(data));
 }).catch(function () {});
 
@@ -304,7 +423,7 @@ function paintBadge(tabId, count) {
 async function applySettingsPatch(patch) {
   patch = patch && typeof patch === "object" ? patch : {};
   await chrome.storage.local.set(patch);
-  const settings = mergedSettings(await chrome.storage.local.get(null));
+  const settings = mergedSettings(await readSettings());
 
   const runtimeKeys = ["adBlock", "strictTracking", "antiAdblock", "ytSkip", "whitelist"];
   if (runtimeKeys.some((key) => Object.prototype.hasOwnProperty.call(patch, key))) {
@@ -320,7 +439,7 @@ async function applySettingsPatch(patch) {
 }
 
 async function mutateWhitelist(mode, hostname) {
-  const data = mergedSettings(await chrome.storage.local.get(null));
+  const data = mergedSettings(await readSettings());
   const domain = normalizeDomain(hostname);
   let whitelist = normalizeWhitelist(data.whitelist);
   if (!domain) return whitelist;
@@ -363,7 +482,7 @@ chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
     }
 
     case "getSettings":
-      chrome.storage.local.get(null).then(function (data) {
+      readSettings().then(function (data) {
         sendResponse(mergedSettings(data));
       }).catch(function () {
         sendResponse(mergedSettings(null));

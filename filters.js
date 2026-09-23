@@ -30,6 +30,20 @@ const FILTERS = {
   COSMETIC_FP_KEY: "filterCosmeticFingerprint",
   FETCH_TIMEOUT_MS: 20000,
 
+  // Site-specific element hiding ("example.com##.ad", "example.com#@#.ad").
+  // Stored one key per domain so a page reads only its own entries; see
+  // installSiteCosmetics() for why writes are incremental.
+  SITE_CSS_PREFIX: "cf:",
+  MAX_SITE_COSMETIC_BYTES: 6 * 1024 * 1024,  // chrome.storage.local holds 10 MB in total
+
+  // These sites have dedicated modules (facebook.js, youtube.js, ...). List
+  // rules there could fight those modules, and one over-broad selector on a
+  // feed wrapper is exactly what once blanked the Facebook feed.
+  SITE_COSMETIC_EXCLUDED: [
+    "facebook.com", "messenger.com", "instagram.com",
+    "youtube.com", "youtube-nocookie.com", "x.com", "twitter.com"
+  ],
+
   /*
    * Source capabilities are explicit. EasyList/EasyPrivacy network rules are
    * already bundled as static DNR rulesets, so repeating them dynamically only
@@ -38,9 +52,11 @@ const FILTERS = {
    */
   SOURCES: [
     {
+      // Previously pointed at filters.adtidy.org/.../25.txt, which is AdGuard's
+      // Mail Tracking Protection filter, not an Arabic list.
       id: "arabic",
-      name: "AdGuard Arabic",
-      url: "https://filters.adtidy.org/extension/chromium/filters/25.txt",
+      name: "Liste AR",
+      url: "https://easylist-downloads.adblockplus.org/Liste_AR.txt",
       enabled: true,
       network: true,
       cosmetic: true,
@@ -73,11 +89,11 @@ const FILTERS = {
       id: "adguard-base",
       name: "AdGuard Base",
       url: "https://filters.adtidy.org/extension/chromium/filters/2.txt",
-      enabled: false,
-      network: true,
+      enabled: true,
+      network: false,
       cosmetic: true,
       priority: 80,
-      role: "optional-global"
+      role: "cosmetic-runtime"
     },
     {
       id: "annoyances",
@@ -245,6 +261,121 @@ const FILTERS = {
     };
   },
 
+  // Syntax that plain CSS cannot express (uBO/AdGuard/ABP extensions).
+  EXTENDED_COSMETIC: /:(has-text|-abp-[a-z-]+|upward|xpath|matches-css(-before|-after)?|matches-attr|matches-path|min-text-length|watch-attr|remove|style|others|contains|if|if-not|nth-ancestor)\(|^\+js\(|^\^|\[-ext-/i,
+
+  safeSelector(sel) {
+    if (!sel || sel.length > 1000) return false;
+    if (/[{}\n\r]/.test(sel) || sel.includes("/*")) return false;
+    return FILTERS.balancedSelector(sel);
+  },
+
+  // An unclosed "(", "[" or quote makes the CSS parser swallow every rule
+  // after it in the same stylesheet, so one broken selector would silently
+  // switch off all the others injected alongside it.
+  balancedSelector(sel) {
+    let paren = 0;
+    let bracket = 0;
+    let quote = "";
+    for (let i = 0; i < sel.length; i++) {
+      const ch = sel[i];
+      if (ch === "\\") { i++; continue; }
+      if (quote) {
+        if (ch === quote) quote = "";
+        continue;
+      }
+      if (ch === "\"" || ch === "'") quote = ch;
+      else if (ch === "(") paren++;
+      else if (ch === ")" && --paren < 0) return false;
+      else if (ch === "[") bracket++;
+      else if (ch === "]" && --bracket < 0) return false;
+    }
+    return !quote && paren === 0 && bracket === 0;
+  },
+
+  isSiteCosmeticExcluded(domain) {
+    for (const base of FILTERS.SITE_COSMETIC_EXCLUDED) {
+      if (domain === base || domain.endsWith("." + base)) return true;
+    }
+    return false;
+  },
+
+  /**
+   * Collect site-specific hiding rules into `into` (domain -> {h:Set, u:Set}).
+   * "a.com,b.com##sel" hides sel on those sites (and their subdomains, which
+   * content.js resolves); "a.com#@#sel" is an exception that also switches a
+   * generic selector off there. Negated or wildcard domain lists and
+   * extended/procedural selectors are skipped rather than approximated.
+   */
+  parseSiteCosmetic(text, into) {
+    let count = 0;
+    for (const line of text.split("\n")) {
+      const s = line.trim();
+      if (!s || s[0] === "!" || s[0] === "[") continue;
+
+      let idx = s.indexOf("#@#");
+      let unhide = true;
+      if (idx <= 0) {
+        idx = s.indexOf("##");
+        unhide = false;
+      }
+      if (idx <= 0) continue;
+      if (/#[?$%]#|#@[?$%]#/.test(s)) continue; // extended / scriptlet / CSS-injection forms
+
+      const sel = s.slice(idx + (unhide ? 3 : 2)).trim();
+      if (!FILTERS.safeSelector(sel) || FILTERS.EXTENDED_COSMETIC.test(sel)) continue;
+
+      const domains = s.slice(0, idx).split(",").map((d) => d.trim().toLowerCase()).filter(Boolean);
+      if (!domains.length || domains.some((d) => d[0] === "~" || d.includes("*") || !/^[a-z0-9.-]+$/.test(d))) continue;
+
+      for (const d of domains) {
+        if (d.startsWith(".") || d.endsWith(".") || !d.includes(".")) continue;
+        if (FILTERS.isSiteCosmeticExcluded(d)) continue;
+        let entry = into.get(d);
+        if (!entry) { entry = { h: new Set(), u: new Set() }; into.set(d, entry); }
+        (unhide ? entry.u : entry.h).add(sel);
+        count++;
+      }
+    }
+    return count;
+  },
+
+  /**
+   * Persist site cosmetics as one "cf:<domain>" key per domain. After the
+   * first build only changed domains are written and vanished ones removed:
+   * every open tab's content scripts receive storage.onChanged with the full
+   * changed values, so rewriting ~3 MB on each daily refresh would push all of
+   * it into every tab.
+   */
+  async installSiteCosmetics(map) {
+    const next = {};
+    let bytes = 0;
+    const domains = Array.from(map.keys()).sort();
+    for (const d of domains) {
+      const e = map.get(d);
+      const value = {};
+      if (e.h.size) value.h = Array.from(e.h).sort();
+      if (e.u.size) value.u = Array.from(e.u).sort();
+      const size = d.length + JSON.stringify(value).length;
+      if (bytes + size > FILTERS.MAX_SITE_COSMETIC_BYTES) break;
+      bytes += size;
+      next[FILTERS.SITE_CSS_PREFIX + d] = value;
+    }
+
+    const all = await chrome.storage.local.get(null);
+    const toSet = {};
+    const toRemove = [];
+    for (const key of Object.keys(all)) {
+      if (key.indexOf(FILTERS.SITE_CSS_PREFIX) === 0 && !Object.prototype.hasOwnProperty.call(next, key)) toRemove.push(key);
+    }
+    for (const key of Object.keys(next)) {
+      if (JSON.stringify(all[key]) !== JSON.stringify(next[key])) toSet[key] = next[key];
+    }
+    if (toRemove.length) await chrome.storage.local.remove(toRemove);
+    if (Object.keys(toSet).length) await chrome.storage.local.set(toSet);
+    return { domains: Object.keys(next).length, written: Object.keys(toSet).length, removed: toRemove.length, bytes };
+  },
+
   /** Pull conservative generic element-hiding selectors out of a list. */
   parseCosmetic(text, maxSelectors) {
     const generic = [];
@@ -258,7 +389,7 @@ const FILTERS = {
       if (idx === -1 || idx > 0) continue; // domain-specific selectors need per-site scoping
 
       const sel = s.slice(idx + 2).trim();
-      if (!sel || sel.startsWith("+js") || sel.startsWith("^")) continue;
+      if (!FILTERS.safeSelector(sel) || sel.startsWith("+js") || sel.startsWith("^")) continue;
       if (sel.includes(":has(") || sel.includes(":not(:") ||
           sel.includes(":matches-css") || sel.includes(":xpath") ||
           sel.includes(":upward") || sel.includes(":style")) continue;
@@ -508,6 +639,7 @@ const FILTERS = {
     const seenRaw = new Set();
     const seenSemantic = new Set();
     const selectors = new Set();
+    const siteCosmetics = new Map();
     const candidates = [];
     let sequence = 0;
 
@@ -570,6 +702,7 @@ const FILTERS = {
         for (const sel of FILTERS.parseCosmetic(result.text, remaining)) selectors.add(sel);
         stat.selectors += selectors.size - beforeSelectors;
       }
+      if (src.cosmetic) stat.siteRules = FILTERS.parseSiteCosmetic(result.text, siteCosmetics);
     }
 
     // If any network-bearing source failed, never replace the previous known-good
@@ -658,6 +791,16 @@ const FILTERS = {
     report.cosmeticRefreshOk = !cosmeticFailed;
     report.cosmeticChanged = stored[FILTERS.COSMETIC_FP_KEY] !== cosmeticFingerprint;
 
+    // Same rule as the generic CSS: a partial refresh would drop every site
+    // whose rules came from the list that failed, so keep the previous set.
+    if (!cosmeticFailed) {
+      try {
+        report.siteCosmetics = await FILTERS.installSiteCosmetics(siteCosmetics);
+      } catch (siteErr) {
+        report.siteCosmetics = { error: siteErr && siteErr.message ? siteErr.message : String(siteErr) };
+      }
+    }
+
     try {
       await chrome.storage.local.set({
         filterReport: report,
@@ -689,6 +832,9 @@ const FILTERS = {
     if (removeRuleIds.length) {
       await chrome.declarativeNetRequest.updateDynamicRules({ removeRuleIds });
     }
+    const all = await chrome.storage.local.get(null);
+    const siteKeys = Object.keys(all).filter((key) => key.indexOf(FILTERS.SITE_CSS_PREFIX) === 0);
+    if (siteKeys.length) await chrome.storage.local.remove(siteKeys);
     await chrome.storage.local.set({
       filterReport: null,
       [FILTERS.CSS_KEY]: [],

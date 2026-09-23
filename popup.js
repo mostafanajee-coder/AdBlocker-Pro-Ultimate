@@ -12,6 +12,7 @@
       todayBlocked: "إعلانات اليوم",
       totalBlocked: "إجمالي المحجوب",
       whitelistSite: "استثناء الموقع",
+      userRulesReset: "إلغاء العناصر المحجوبة في هذا الموقع",
       removeWhitelist: "إلغاء الاستثناء",
       coreProtection: "الحماية الأساسية",
       adBlock: "حاجب الإعلانات",
@@ -51,6 +52,7 @@
       todayBlocked: "Blocked Today",
       totalBlocked: "Total Blocked",
       whitelistSite: "Whitelist Site",
+      userRulesReset: "Undo blocked elements on this site",
       removeWhitelist: "Remove Whitelist",
       coreProtection: "Core Protection",
       adBlock: "Ad Blocker",
@@ -120,6 +122,8 @@
     var wlBtn = document.getElementById("whitelistToggleBtn");
     if (wlBtn) wlBtn.title = t.whitelistTitle;
 
+    renderUserRulesButton();
+
     var filterStatEl = document.getElementById("filterStat");
     if (filterStatEl) {
       var numMatch = filterStatEl.textContent.match(/[\d,]+/);
@@ -149,6 +153,27 @@
       document.getElementById("themeBtn").textContent = "🌙";
     }
     chrome.storage.local.set({ userTheme: theme });
+  }
+
+  // Elements blocked with right-click are saved per exact hostname as
+  // "cu:<host>" (see content.js). The button appears only when there are some.
+  var userRuleCount = 0;
+
+  function renderUserRulesButton() {
+    var btn = document.getElementById("userRulesResetBtn");
+    var label = document.getElementById("userRulesResetText");
+    if (!btn || !label) return;
+    btn.hidden = userRuleCount === 0;
+    label.textContent = (TRANSLATIONS[currentLang] || TRANSLATIONS.en).userRulesReset + " (" + userRuleCount + ")";
+  }
+
+  function loadUserRuleCount() {
+    if (!currentHostname) return;
+    var key = "cu:" + currentHostname.toLowerCase();
+    chrome.storage.local.get(key, function (res) {
+      userRuleCount = (res && Array.isArray(res[key])) ? res[key].length : 0;
+      renderUserRulesButton();
+    });
   }
 
   function getCurrentTab(cb) {
@@ -262,6 +287,15 @@
       applyLanguage(currentLang === "ar" ? "en" : "ar", true);
     });
 
+    document.getElementById("userRulesResetBtn").addEventListener("click", function () {
+      if (!currentHostname) return;
+      chrome.storage.local.remove("cu:" + currentHostname.toLowerCase(), function () {
+        userRuleCount = 0;
+        renderUserRulesButton();
+        if (currentTabId) chrome.tabs.reload(currentTabId);
+      });
+    });
+
     // Whitelist Drawer Toggle
     document.getElementById("manageWhitelistToggle").addEventListener("click", function () {
       var drawer = document.getElementById("whitelistDrawer");
@@ -331,6 +365,7 @@
       currentTabId = tab.id;
       try {
         currentHostname = new URL(tab.url).hostname;
+        loadUserRuleCount();
         document.getElementById("domainDisplay").textContent = currentHostname;
       } catch (_) {
         document.getElementById("domainDisplay").textContent = "Local / System";

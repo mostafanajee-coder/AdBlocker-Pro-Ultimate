@@ -23,6 +23,8 @@ async function run() {
     { id: FILTERS.RULE_ID_BASE, priority: 1, action: { type: 'block' }, condition: { urlFilter: 'old-owned-rule' } }
   ];
   let lastUpdate = null;
+  const setCalls = [];
+  storage['cf:stale.example'] = { h: ['.left-over'] }; // from an older build
 
   global.chrome = {
     storage: {
@@ -33,7 +35,8 @@ async function run() {
           for (const k of keys) out[k] = storage[k];
           return out;
         },
-        async set(obj) { Object.assign(storage, obj); }
+        async set(obj) { setCalls.push(Object.keys(obj)); Object.assign(storage, obj); },
+        async remove(keys) { for (const k of [].concat(keys)) delete storage[k]; }
       }
     },
     declarativeNetRequest: {
@@ -49,7 +52,7 @@ async function run() {
 
   const originalFetch = FILTERS.fetchList;
   FILTERS.fetchList = async function (url) {
-    if (url.includes('/25.txt')) {
+    if (url.includes('Liste_AR.txt')) {
       return longEnough([
         '! AdGuard Arabic mock',
         '||ads.example.com^',
@@ -58,7 +61,8 @@ async function run() {
         '||semantic.test^$image,script',
         '||unsafe.test^$removeparam=utm_source',
         '@@||allowed.test^',
-        '##.arabic-ad'
+        '##.arabic-ad',
+        'ahram.org.eg##.ar-sidebar-ad'
       ]);
     }
     if (url.includes('easylist.txt')) {
@@ -66,7 +70,10 @@ async function run() {
         '! EasyList mock',
         '||must-not-enter-dynamic.test^',
         '##.easylist-ad',
-        '##.shared-ad'
+        '##.shared-ad',
+        'example.com##.site-ad',
+        'example.com#@#.shared-ad',
+        'facebook.com##div[role="feed"]'
       ]);
     }
     throw new Error('unexpected source ' + url);
@@ -88,17 +95,30 @@ async function run() {
   check(report.sources.every(src => Object.prototype.hasOwnProperty.call(src, 'installed')), 'records installed-rule provenance per source');
   check(typeof storage.filterNetworkFingerprint === 'string' && storage.filterNetworkFingerprint.length > 8, 'stores a compiled-network fingerprint after a successful install');
 
+  console.log('\nSite-specific cosmetics\n-----------------------');
+  check(storage['cf:example.com'] && storage['cf:example.com'].h.includes('.site-ad'), 'stores site hiding rules under their domain key');
+  check(storage['cf:example.com'] && storage['cf:example.com'].u.includes('.shared-ad'), 'stores site exceptions alongside them');
+  check(storage['cf:ahram.org.eg'] && storage['cf:ahram.org.eg'].h.includes('.ar-sidebar-ad'), 'includes Arabic-site rules from Liste AR');
+  check(!storage['cf:facebook.com'], 'stores nothing for sites with dedicated modules');
+  check(!('cf:stale.example' in storage), 'removes entries for sites no longer in the lists');
+  check(report.siteCosmetics && report.siteCosmetics.domains === 2, 'reports how many sites have hiding rules');
+  const siteWritesFirst = setCalls.flat().filter(k => k.startsWith('cf:')).length;
+  check(siteWritesFirst === 2, 'first build writes each site entry once');
+
   console.log('\nUnchanged-build short circuit\n-----------------------------');
   lastUpdate = null;
   const unchangedReport = await FILTERS.rebuild();
   check(unchangedReport.installOk === true && unchangedReport.networkChanged === false, 'detects when compiled network output is unchanged');
   check(lastUpdate === null, 'unchanged compiled output skips the DNR replacement operation');
+  setCalls.length = 0;
+  await FILTERS.rebuild();
+  check(!setCalls.flat().some(k => k.startsWith('cf:')), 'an unchanged refresh rewrites no site entries (no storage.onChanged flood to open tabs)');
 
   console.log('\nPartial-refresh safety\n----------------------');
   lastUpdate = null;
   const snapshot = JSON.stringify(dynamicRules);
   FILTERS.fetchList = async function (url) {
-    if (url.includes('/25.txt')) throw new Error('simulated outage');
+    if (url.includes('Liste_AR.txt')) throw new Error('simulated outage');
     if (url.includes('easylist.txt')) return longEnough(['! list', '##.new-cosmetic', '||ignored.test^', '||x.test^']);
     throw new Error('unexpected source ' + url);
   };
@@ -107,12 +127,14 @@ async function run() {
   check(lastUpdate === null, 'network-source outage does not install a partial replacement');
   check(JSON.stringify(dynamicRules) === snapshot, 'previous known-good dynamic rules remain unchanged on failed refresh');
   check(storage.cosmeticCss.includes('.easylist-ad'), 'failed refresh keeps previous cosmetic CSS');
+  check(storage['cf:example.com'] && storage['cf:example.com'].h.includes('.site-ad'), 'failed refresh keeps previous site hiding rules');
 
   console.log('\nOwned-range clearing\n--------------------');
   lastUpdate = null;
   await FILTERS.clear();
   check(lastUpdate && lastUpdate.removeRuleIds.every(id => FILTERS.isManagedRuleId(id)), 'clear removes only rules owned by the filter engine');
   check(dynamicRules.some(r => r.id === 42), 'clear preserves foreign dynamic rules');
+  check(!Object.keys(storage).some(k => k.startsWith('cf:')), 'clear removes site hiding entries too');
 
   FILTERS.fetchList = originalFetch;
 

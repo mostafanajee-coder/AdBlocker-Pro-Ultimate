@@ -1,10 +1,10 @@
 {
   "name": "ad-blocker-pro",
-  "version": "5.2.15",
+  "version": "5.4.1",
   "private": true,
   "description": "Ultra-fast Manifest V3 ad blocker: Core community filter lists, Facebook and Instagram sponsored-post detection, zero-play YouTube response sanitizing, and Popunder neutralization.",
   "scripts": {
-    "test": "node tests/fb-detect.test.js && node tests/facebook-orchestration.test.js && node tests/youtube-sanitizer.test.js && node tests/instagram.test.js && node tests/twitter.test.js && node tests/filter-engine.test.js && node tests/settings-wiring.test.js && node tests/filter-pipeline.test.js"
+    "test": "node tests/fb-detect.test.js && node tests/facebook-orchestration.test.js && node tests/youtube-sanitizer.test.js && node tests/instagram.test.js && node tests/twitter.test.js && node tests/filter-engine.test.js && node tests/settings-wiring.test.js && node tests/background-migration.test.js && node tests/background-block-menu.test.js && node tests/filter-pipeline.test.js"
   },
   "engines": {
     "node": ">=18"

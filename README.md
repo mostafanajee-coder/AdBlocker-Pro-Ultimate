@@ -18,7 +18,9 @@ This maintenance build focuses on filter-source quality and Manifest V3 quota ef
 | Feature | Legacy MV2 Blockers | Ad Blocker Pro Ultimate (v5.1.2) |
 | :--- | :--- | :--- |
 | **Manifest Compatibility** | Deprecated / Disabled in Chrome 120+ | **Native Manifest V3 Compliance** |
-| **Network Filtering** | Heavy webRequest memory overhead | **9,531 static DNR rules enabled by default + 8,920 Strict Tracking rules on demand + up to 29,000 managed dynamic rules** |
+| **Network Filtering** | Heavy webRequest memory overhead | **~18,500 static DNR rules covering 100,000+ ad, tracker and malware domains, tracking protection on by default, + up to 29,000 managed dynamic rules** |
+| **Element Hiding** | Generic rules only, empty ad boxes left behind | **Site-specific hiding for 20,000+ sites (EasyList, AdGuard Base, Liste AR), with each site's exceptions honoured** |
+| **Manual Blocking** | Element pickers that can hide a whole page | **Right-click "Block this element" opens a preview: the element is highlighted, Bigger/Smaller adjust the selection, nothing changes until Block is pressed; oversized or imprecise selections cannot be confirmed; per-site undo in the popup; never offered on Facebook, Messenger, Instagram, YouTube or X** |
 | **Anti-Adblock Defusal** | Easily detected via missing global objects | **37 Web Accessible Resource Stubs (`noop.js`, `1x1.gif`)** |
 | **YouTube Ads** | Blocked with black screens or video freezes | **In-Stream JSON Stripper + Instant Auto-Play Kickstart** |
 | **Facebook & Reels** | Broken by DOM obfuscation & black screens | **Visual Coordinate Reconstruction + Recycled-Node Guard** |
@@ -35,7 +37,7 @@ This maintenance build focuses on filter-source quality and Manifest V3 quota ef
 Ad Blocker Pro Ultimate incorporates the official, clean core filter lists from the uBlock Origin / EasyList ecosystem:
 * **`ublock-filters.json`**: Dynamic ad networks, malicious redirects, and intrusive ad scripts.
 * **`easylist.json`**: Primary global cosmetic and banner ad blocking.
-* **`easyprivacy.json`**: Comprehensive privacy protection and third-party tracker blocking; enabled by the **Strict Tracking** switch.
+* **`easyprivacy.json`**: Comprehensive privacy protection and third-party tracker blocking; on by default, controlled by the **Strict Tracking** switch.
 * **`pgl.json`**: Peter Lowe’s verified ad server hostname database.
 * **`ublock-badware.json`**: Protection against forced redirects, phishing, and scam domains.
 * **`urlhaus-full.json`**: Real-time malware URL blocker.
@@ -51,6 +53,10 @@ Community sources are not blindly appended to Chrome DNR. The runtime pipeline:
 * keeps the previous known-good ruleset if a network source fails or Chrome rejects an update;
 * fingerprints the compiled result and skips needless DNR replacement when nothing meaningful changed;
 * records per-source provenance statistics for diagnostics.
+
+Runtime sources (refreshed daily): **Liste AR** (Arabic sites; network + hiding), **EasyList** and **AdGuard Base** (element hiding; their network rules are already covered by the bundled rulesets).
+
+**Site-specific element hiding.** Rules such as `example.com##.sidebar-ad` and their exceptions (`example.com#@#.ad-banner`, which also switch a generic rule off on that site) are stored one entry per domain, so each page reads only its own site's rules in the same storage read as its settings. Only plain CSS is used: extended/procedural syntax, scriptlets, negated or wildcard domain lists, and any selector with braces or unbalanced brackets/quotes are skipped rather than approximated, and each page re-checks every selector with Chrome's own parser before applying it. After the first build only changed sites are rewritten, so a daily refresh does not flood open tabs with storage-change events. Facebook, Messenger, Instagram, YouTube and X are left to their dedicated modules.
 
 ### 3. 🎬 YouTube In-Stream Zero-Latency Response Sanitizer (`youtube-sanitizer.js`, `youtube-main.js`)
 YouTube injects ads directly into player streams via server responses. Ad Blocker Pro Ultimate intercepts `window.ytInitialPlayerResponse` and `/youtubei/v1/player` in the `MAIN` execution world before the YouTube Player Web Component initializes:
