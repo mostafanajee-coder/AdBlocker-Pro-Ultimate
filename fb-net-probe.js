@@ -51,7 +51,8 @@
  *     incrementally via progress events for its own streaming render, so
  *     rewriting it risks desyncing that parser — a worse failure mode than
  *     the hydration error above. XHR is only ever observed here, never
- *     modified.
+ *     modified. The fetch() line filter has since been switched off too
+ *     (see ENABLE_LINE_FILTER), so fetch() is no longer wrapped at all.
  * ========================================================================== */
 (function () {
   "use strict";
@@ -105,7 +106,13 @@
     }
   } catch (_) {}
 
-  var ENABLE_LINE_FILTER = true;
+  // Off, and fetch() is left untouched entirely. Dropping or rewriting lines
+  // of Facebook's own GraphQL stream is the only place this extension changes
+  // page data instead of hiding DOM, and a lost line can leave the feed empty
+  // while the rest of the page renders. Feed traffic was confirmed to be XHR
+  // (observed read-only below), and the DOM-level detection in facebook.js
+  // hides the same stories anyway.
+  var ENABLE_LINE_FILTER = false;
 
   function bump(attr, by) {
     try {
@@ -186,7 +193,7 @@
   try {
     var origFetch = window.fetch;
     var canStream = typeof TransformStream !== "undefined";
-    if (typeof origFetch === "function" && canStream) {
+    if (ENABLE_LINE_FILTER && typeof origFetch === "function" && canStream) {
       window.fetch = function (input, init) {
         var url = (typeof input === "string") ? input : (input && input.url) || "";
         var result = origFetch.apply(this, arguments);
