@@ -45,10 +45,45 @@
   // 3. Bulletproof Popunder Disarmer for Video Players & Streaming Sites
   try {
     var originalWindowOpen = window.open;
-    var AD_URL_REGEX = /popads|popcash|propellerads|adsterra|monetag|adcash|exoclick|trafficjunky|clickadu|hilltopads|bet365|1xbet|melbet|directrev|cpmgate|delivery|smartlink|safelink|track|click|bonus|offer|game|doublepimp|onclick|syndication|revenuehits/i;
+    // Popunder ad-network domains, matched on the destination's hostname (the
+    // domain or a subdomain of it). Generic words matched anywhere in the URL
+    // ("track", "click", "game", "offer", "delivery") used to stop FedEx
+    // tracking, Steam and Amazon order popups on every site.
+    var AD_NETWORK_DOMAINS = [
+      "popads.net", "popcash.net", "propellerads.com", "adsterra.com",
+      "monetag.com", "adcash.com", "exoclick.com", "trafficjunky.com",
+      "trafficjunky.net", "clickadu.com", "hilltopads.net", "hilltopads.com",
+      "directrev.com", "ad-maven.com", "adtrue.com", "revenuehits.com",
+      "yllix.com", "bidvertiser.com", "ero-advertising.com", "trafficstars.com",
+      "juicyads.com", "plugrush.com", "clickaine.com", "adxad.com",
+      "pushground.com", "clickadilla.com", "richpush.co", "evadav.com",
+      "onclicksuper.com", "onclickalgo.com", "onclickbright.com",
+      "onclickperformance.com", "ad-delivery.net", "highperformanceformat.com",
+      "effectivegate.com", "effectivecpmgate.com", "profitablegatecpm.com",
+      "doublepimp.com", "bestcpmgate.com", "alwingulla.com", "bidgear.com",
+      "delivertrk.com", "realsrv.com", "adnxs.com", "adskeeper.co.uk",
+      "mgid.com", "zeroredirect.com"
+    ];
 
+    function isAdDestination(url) {
+      var host;
+      try { host = new URL(url, window.location.href).hostname.toLowerCase(); } catch (_) { return false; }
+      for (var i = 0; i < AD_NETWORK_DOMAINS.length; i++) {
+        var d = AD_NETWORK_DOMAINS[i];
+        if (host === d || host.slice(-d.length - 1) === "." + d) return true;
+      }
+      return false;
+    }
+
+    // Known pirate-streaming hosts only. "stream" and "player" matched
+    // Streamlabs, player.vimeo.com and any embedded player; "shahid" matched
+    // Shahid, MBC's legitimate streaming service.
     function isStreamingSite(host) {
-      return /faselhd|faselhdx|wecima|mycima|akwam|arabseed|egybest|egydead|cima|shahid|laroza|stream|player/i.test(host);
+      return /faselhd|faselhdx|wecima|mycima|akwam|arabseed|egybest|egydead|cima|laroza/i.test(host);
+    }
+
+    function isBlankUrl(url) {
+      return !url || url === "about:blank";
     }
 
     function isExternalDomain(url) {
@@ -70,24 +105,26 @@
       // Rule A: Do not blanket-block every iframe popup. Only block iframe
       // opens when the destination is clearly ad-related or the frame itself
       // belongs to a known streaming host.
-      if (isInsideIframe && (isStreamingSite(curHost) || (urlStr && AD_URL_REGEX.test(urlStr)))) {
+      if (isInsideIframe && (isStreamingSite(curHost) || (urlStr && isAdDestination(urlStr)))) {
         return null;
       }
 
-      // Rule B: On streaming sites, any window.open to an external domain is an ad popunder
-      if (isStreamingSite(curHost) && urlStr && isExternalDomain(urlStr)) {
+      // Rule B: On streaming sites, any window.open to an external domain is
+      // an ad popunder. about:blank is left to Rule D, which hands back a
+      // stand-in window: returning null there can break the site's own script.
+      if (isStreamingSite(curHost) && !isBlankUrl(urlStr) && isExternalDomain(urlStr)) {
         return null;
       }
 
-      // Rule C: Obvious ad networks regex match
-      if (urlStr && AD_URL_REGEX.test(urlStr)) {
+      // Rule C: popups to a known ad network, on any site
+      if (urlStr && isAdDestination(urlStr)) {
         return null;
       }
 
       // Rule D: Dummy window for about:blank redirect traps, but only on
       // streaming hosts. Legitimate sites often open about:blank for OAuth,
       // editors, print previews, and other real workflows.
-      if (isStreamingSite(curHost) && (!url || url === "about:blank")) {
+      if (isStreamingSite(curHost) && isBlankUrl(urlStr)) {
         var dummyWindow = {
           closed: false,
           focus: function () {},
@@ -95,15 +132,15 @@
           close: function () { this.closed = true; },
           location: {
             replace: function (dest) {
-              if (AD_URL_REGEX.test(dest) || (isStreamingSite(curHost) && isExternalDomain(dest))) return;
+              if (isAdDestination(dest) || (isStreamingSite(curHost) && isExternalDomain(dest))) return;
               window.location.href = dest;
             },
             assign: function (dest) {
-              if (AD_URL_REGEX.test(dest) || (isStreamingSite(curHost) && isExternalDomain(dest))) return;
+              if (isAdDestination(dest) || (isStreamingSite(curHost) && isExternalDomain(dest))) return;
               window.location.href = dest;
             },
             set href(dest) {
-              if (AD_URL_REGEX.test(dest) || (isStreamingSite(curHost) && isExternalDomain(dest))) return;
+              if (isAdDestination(dest) || (isStreamingSite(curHost) && isExternalDomain(dest))) return;
               window.location.href = dest;
             }
           }

@@ -15,8 +15,10 @@
     return false;
   }
 
+  // Pirate-streaming hosts, where click-trap links are removed. Shahid (MBC's
+  // legitimate service) used to be on this list.
   function isStreamingSite(host) {
-    return /faselhd|faselhdx|wecima|mycima|akwam|arabseed|egybest|egydead|cima|shahid|laroza|dood|vidmoly|streamtape/i.test(host);
+    return /faselhd|faselhdx|wecima|mycima|akwam|arabseed|egybest|egydead|cima|laroza|dood|vidmoly|streamtape/i.test(host);
   }
 
   function shouldSkip(target) {
@@ -369,7 +371,9 @@
     bigger: ["تكبير ↑", "Bigger ↑"],
     smaller: ["تصغير ↓", "Smaller ↓"],
     block: ["حجب", "Block"],
-    cancel: ["إلغاء", "Cancel"]
+    cancel: ["إلغاء", "Cancel"],
+    hintFollow: ["حرّك الماوس لاختيار الجزء، ثم انقر لتثبيته", "Move the mouse to pick a part, then click to pin it"],
+    hintPinned: ["↑ ↓ للتعديل — Enter للحجب — انقر عنصرًا آخر لتغييره", "↑ ↓ to adjust — Enter to block — click another element to change it"]
   };
 
   function pickText(key, n) {
@@ -385,6 +389,7 @@
     ".box.bad { border: 2px solid #f9a825; background: rgba(249, 168, 37, 0.18); }",
     ".bar { position: fixed; left: 50%; transform: translateX(-50%); z-index: 2147483647; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: center; max-width: calc(100vw - 24px); box-sizing: border-box; background: rgba(20, 20, 30, 0.95); color: #fff; font: 600 13px/1.3 system-ui, -apple-system, 'Segoe UI', sans-serif; padding: 8px 10px; border-radius: 12px; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4); }",
     ".bar.top { top: 12px; } .bar.bottom { bottom: 12px; }",
+    ".hint { flex-basis: 100%; text-align: center; font-weight: 500; font-size: 12px; color: #b0bec5; }",
     ".status { padding: 0 6px; }",
     ".status.bad { color: #ffd54f; }",
     "button { font: inherit; border: 0; border-radius: 8px; padding: 6px 12px; cursor: pointer; background: #3a3f4b; color: #fff; }",
@@ -415,6 +420,8 @@
     var bar = document.createElement("div");
     bar.className = "bar top";
     bar.dir = uiIsArabic() ? "rtl" : "ltr";
+    var hint = document.createElement("div");
+    hint.className = "hint";
     var status = document.createElement("span");
     status.className = "status";
     function button(key, cls, onClick) {
@@ -429,17 +436,21 @@
     var smaller = button("smaller", "", pickerSmaller);
     var block = button("block", "block", pickerConfirm);
     var cancel = button("cancel", "", stopPicker);
-    bar.append(status, bigger, smaller, block, cancel);
+    bar.append(hint, status, bigger, smaller, block, cancel);
     root.append(style, boxes, bar);
     document.documentElement.appendChild(host);
 
+    // Starts by following the mouse, so a small part inside a bigger block
+    // can be reached just by pointing at it. A click (or ↑/↓) pins it.
     picker = {
-      host: host, boxes: boxes, bar: bar, status: status,
+      host: host, boxes: boxes, bar: bar, hint: hint, status: status,
       bigger: bigger, smaller: smaller, block: block,
-      current: target, stack: [], verdict: null, frame: 0
+      current: target, stack: [], verdict: null, frame: 0,
+      following: true, moveFrame: 0, pointX: 0, pointY: 0
     };
     pickerSelect(target, []);
 
+    window.addEventListener("mousemove", onPickerMove, true);
     window.addEventListener("keydown", onPickerKey, true);
     window.addEventListener("click", onPickerClick, true);
     window.addEventListener("scroll", pickerRepositionSoon, true);
@@ -448,11 +459,13 @@
 
   function stopPicker() {
     if (!picker) return;
+    window.removeEventListener("mousemove", onPickerMove, true);
     window.removeEventListener("keydown", onPickerKey, true);
     window.removeEventListener("click", onPickerClick, true);
     window.removeEventListener("scroll", pickerRepositionSoon, true);
     window.removeEventListener("resize", pickerRepositionSoon, true);
     if (picker.frame) cancelAnimationFrame(picker.frame);
+    if (picker.moveFrame) cancelAnimationFrame(picker.moveFrame);
     picker.host.remove();
     picker = null;
   }
@@ -466,6 +479,7 @@
       ? (v.matches.length > 1 ? pickText("readyN", v.matches.length) : pickText("ready1"))
       : pickText(v.reason);
     picker.status.className = v.ok ? "status" : "status bad";
+    picker.hint.textContent = pickText(picker.following ? "hintFollow" : "hintPinned");
     picker.block.disabled = !v.ok;
     picker.smaller.disabled = stack.length === 0;
     var parent = el.parentElement;
@@ -501,13 +515,35 @@
 
   function pickerBigger() {
     if (!picker || picker.bigger.disabled) return;
+    picker.following = false;
     pickerSelect(picker.current.parentElement, picker.stack.concat([picker.current]));
   }
 
   function pickerSmaller() {
     if (!picker || !picker.stack.length) return;
+    picker.following = false;
     var stack = picker.stack.slice();
     pickerSelect(stack.pop(), stack);
+  }
+
+  // While following, the highlight tracks the element under the mouse, one
+  // update per frame. Over the picker's own bar it keeps the last selection,
+  // so moving to the buttons does not change what is highlighted.
+  function onPickerMove(e) {
+    if (!picker || !picker.following) return;
+    picker.pointX = e.clientX;
+    picker.pointY = e.clientY;
+    if (!picker.moveFrame) picker.moveFrame = requestAnimationFrame(pickerFollowPointer);
+  }
+
+  function pickerFollowPointer() {
+    if (!picker) return;
+    picker.moveFrame = 0;
+    if (!picker.following) return;
+    var el = document.elementFromPoint(picker.pointX, picker.pointY);
+    if (!el || el === picker.host || el === picker.current) return;
+    if (el === document.body || el === document.documentElement) return;
+    pickerSelect(el, []);
   }
 
   function pickerConfirm() {
@@ -540,8 +576,12 @@
     e.preventDefault();
     e.stopPropagation();
     e.stopImmediatePropagation();
+    // A click pins the selection: the element clicked, or the one already
+    // highlighted if the click landed on the page background.
+    picker.following = false;
     var el = e.target && e.target.nodeType === 1 ? e.target : null;
     if (el && el !== document.body && el !== document.documentElement) pickerSelect(el, []);
+    else pickerSelect(picker.current, picker.stack);
   }
 
   // A saved rule is re-applied on every visit, and sites change: drop any
@@ -573,6 +613,12 @@
   }
 
   chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
+    if (msg && msg.type === "ABP_BLOCK_UNAVAILABLE") {
+      lastContextTarget = null;
+      showToast("حجب العناصر غير متاح في هذا الموقع", "Blocking elements is not available on this site");
+      sendResponse({ ok: true });
+      return;
+    }
     if (msg && msg.type === "ABP_BLOCK_ELEMENT") {
       var target = lastContextTarget && document.contains(lastContextTarget) ? lastContextTarget : null;
       lastContextTarget = null;

@@ -47,6 +47,13 @@ check((manifest.permissions || []).includes('contextMenus'), 'right-click "Block
   const contentList = listMatch ? JSON.parse(listMatch[1].replace(/'/g, '"')) : null;
   check(contentList && JSON.stringify(contentList) === JSON.stringify(FILTERS.SITE_COSMETIC_EXCLUDED), 'content.js never blocks on exactly the sites filters.js and background.js exclude');
 }
+{
+  const contentSrc = fs.readFileSync(path.join(__dirname, '..', 'content.js'), 'utf8');
+  const m = /function isStreamingSite\(host\) \{\s*return (\/[^\n]*\/i)\.test\(host\);/.exec(contentSrc);
+  const re = m ? eval(m[1]) : null;
+  check(re && re.test('mycima.example') && re.test('www.faselhd.tv') && !re.test('shahid.mbc.net'), 'click-trap removal targets pirate streaming hosts, not Shahid (MBC)');
+}
+check(!/innerHTML\s*=\s*["']<span>["']\s*\+\s*domain/.test(popup), 'the popup builds exception-list rows as text, never as HTML from the domain');
 check(manifest.minimum_chrome_version === '119', 'minimum Chrome version covers dynamic MAIN-world related-frame registration');
 
 console.log('\n' + '='.repeat(64));

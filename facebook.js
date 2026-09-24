@@ -859,11 +859,16 @@
   }
 
   var reportTimer = null;
+  var reportedBlocked = 0;
+  // Sends this page's running total (for the badge) and how many were newly
+  // blocked since the last report (for the daily/total statistics).
   function report() {
     if (reportTimer) return;
     reportTimer = setTimeout(function () {
       reportTimer = null;
-      try { chrome.runtime.sendMessage({ type: "abpBlocked", count: blocked, host: "facebook" }).catch(function () {}); } catch (_) {}
+      var added = blocked - reportedBlocked;
+      reportedBlocked = blocked;
+      try { chrome.runtime.sendMessage({ type: "abpBlocked", total: blocked, added: added, host: "facebook" }).catch(function () {}); } catch (_) {}
     }, 600);
   }
 
@@ -1377,7 +1382,14 @@
     for (var i = 0; i < vids.length; i++) {
       var card = reelCardOf(vids[i]);
       if (!card || card.__abpHidden || !isActiveSlide(card)) continue;
+      // Changes elsewhere on the page (comments, counters, the next reel
+      // loading) run this constantly. A reel already found not to be an ad,
+      // whose own content has not changed since, is not re-read: the full
+      // read checks the visibility of every short label in it.
+      var sig = card.querySelectorAll("*").length + ":" + (card.textContent || "").length;
+      if (card.__abpReelSig === sig) continue;
       if (reelCardIsAd(card)) hide(card, "sponsored-reel");
+      else card.__abpReelSig = sig;
     }
   }
 

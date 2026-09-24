@@ -202,10 +202,18 @@
       return;
     }
 
+    // Built with DOM APIs: the domain is text, never parsed as HTML.
     whitelist.forEach(function (domain) {
       var item = document.createElement("div");
       item.className = "whitelist-item";
-      item.innerHTML = "<span>" + domain + "</span><span class='remove-domain-btn' data-domain='" + domain + "'>✕</span>";
+      var name = document.createElement("span");
+      name.textContent = domain;
+      var remove = document.createElement("span");
+      remove.className = "remove-domain-btn";
+      remove.setAttribute("data-domain", domain);
+      remove.textContent = "✕";
+      item.appendChild(name);
+      item.appendChild(remove);
       listEl.appendChild(item);
     });
 

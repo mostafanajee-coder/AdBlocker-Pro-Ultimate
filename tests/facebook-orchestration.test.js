@@ -524,7 +524,7 @@ function createHarness(options = {}) {
       local: { get: (_keys, callback) => callback({}) },
       onChanged: { addListener: (callback) => listeners.push(callback) }
     },
-    runtime: { sendMessage: () => ({ catch: () => {} }) }
+    runtime: { sendMessage: (msg) => { if (options.messages) options.messages.push(msg); return { catch: () => {} }; } }
   };
 
   class TestMutationObserver {
@@ -1339,6 +1339,61 @@ section("26. On a wide screen, an ad label appearing on the reel on screen is ac
   stepUntil(h, () => video.muted === true); // runs only the timers this page change queued
   check("it is covered straight away, with no periodic sweep involved", slide.style.getPropertyValue("opacity"), "0");
   check("and skipped", next.__clicks, 1);
+});
+
+section("27. Blocked-ad reports carry how many were newly blocked, not a running total to be re-added", () => {
+  const messages = [];
+  const h = createHarness({ messages });
+  const first = card(h);
+  first.appendChild(h.doc.createElement("span").append(text(h, "Sponsored")));
+  h.main.appendChild(first);
+  h.mutate({ type: "childList", target: h.main, addedNodes: [first] });
+
+  const second = card(h);
+  second.appendChild(h.doc.createElement("span").append(text(h, "Sponsored")));
+  h.main.appendChild(second);
+  h.mutate({ type: "childList", target: h.main, addedNodes: [second] });
+
+  const reports = messages.filter((m) => m.type === "abpBlocked");
+  const addedSum = reports.reduce((sum, m) => sum + (m.added || 0), 0);
+  check("two reports for two separately hidden ads", reports.length, 2);
+  check("their newly-blocked counts add up to 2, not 1+2", addedSum, 2);
+  check("the last report carries the page's running total for the badge", reports.length ? reports[reports.length - 1].total : null, 2);
+  check("no report uses the old ambiguous 'count' field", reports.some((m) => "count" in m), false);
+});
+
+section("28. An ordinary reel is not re-read on every unrelated page change", () => {
+  const h = createHarness();
+  h.window.location.pathname = "/reel/1";
+  const slide = h.doc.createElement("div");
+  slide.rect = { left: 0, top: 0, width: 400, height: 800 };
+  slide.appendChild(stubVideo(h));
+  for (let i = 0; i < 5; i++) slide.appendChild(h.doc.createElement("span").append(text(h, "caption " + i)));
+  h.main.appendChild(slide);
+
+  let reads = 0;
+  const realReadLabel = h.window.ABPDetect.readLabel;
+  h.window.ABPDetect.readLabel = function () { reads++; return realReadLabel.apply(this, arguments); };
+
+  function unrelatedChange() {
+    const extra = h.doc.createElement("div");
+    h.doc.body.appendChild(extra);
+    h.state.observer.callback([{ type: "childList", target: h.doc.body, addedNodes: [extra], removedNodes: [] }]);
+    h.scheduler.flush();
+  }
+
+  unrelatedChange(); // first look at the reel on screen
+  check("the reel on screen is read once", reads > 0, true);
+  reads = 0;
+  unrelatedChange();
+  unrelatedChange();
+  check("and not re-read while its content is unchanged", reads, 0);
+
+  const late = h.doc.createElement("span").append(text(h, "Ad"));
+  slide.appendChild(late);
+  h.state.observer.callback([{ type: "childList", target: h.doc.body, addedNodes: [], removedNodes: [] }]);
+  h.scheduler.flush();
+  check("a label added to the reel later is still noticed", slide.getAttribute("data-abp-reel-skip") !== null || slide.style.getPropertyValue("opacity") === "0", true);
 });
 
 console.log(`\n${"=".repeat(64)}`);

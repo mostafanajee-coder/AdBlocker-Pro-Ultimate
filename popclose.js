@@ -2,8 +2,9 @@
  * popclose.js — Smart Popunder Neutralizer
  *
  * Runs only when ad blocking is enabled and the current site is not whitelisted.
- * It closes known advertising popup destinations from inside the popup itself,
- * leaving the parent page's window.open API untouched.
+ * It closes a window that a page's script opened onto a known ad-network
+ * domain, from inside that popup, leaving the parent page's window.open API
+ * untouched. Anything the user opened themselves is never closed.
  * ========================================================================== */
 
 (function () {
@@ -24,35 +25,33 @@
   try { hostname = window.location.hostname.toLowerCase(); } catch (_) { return; }
   if (!hostname || hostname === "localhost") return;
 
-  var POPUP_AD_PATTERNS = [
-    "popads", "popcash", "propellerads", "adsterra", "monetag", "adcash",
-    "exoclick", "trafficjunky", "clickadu", "hilltopads", "bet365", "1xbet",
-    "melbet", "linebet", "mostbet", "parimatch", "directrev", "ad-maven",
-    "adtrue", "revenuehits", "yllix", "bidvertiser", "ero-advertising",
-    "trafficstars", "juicyads", "plugrush", "clickaine", "adxad",
-    "pushground", "clickadilla", "richpush", "evadav", "onclickalgo",
-    "onclickbright", "onclickperformance", "syndication.exoclick",
-    "landing", "track", "smartlink", "safelink", "redirect", "click"
-  ];
-
+  // Popunder ad-network domains, matched as the host itself or a subdomain of
+  // it, never as a substring: generic words ("click", "track", "landing") and
+  // affiliate URL parameters used to match ClickUp, ClickHouse, 17track or an
+  // AliExpress affiliate link and close them, since window.close() succeeds on
+  // a tab whose history holds a single page.
   var POPUP_AD_DOMAINS = [
+    "popads.net", "popcash.net", "propellerads.com", "adsterra.com",
+    "monetag.com", "adcash.com", "exoclick.com", "trafficjunky.com",
+    "trafficjunky.net", "clickadu.com", "hilltopads.net", "hilltopads.com",
+    "directrev.com", "ad-maven.com", "adtrue.com", "revenuehits.com",
+    "yllix.com", "bidvertiser.com", "ero-advertising.com", "trafficstars.com",
+    "juicyads.com", "plugrush.com", "clickaine.com", "adxad.com",
+    "pushground.com", "clickadilla.com", "richpush.co", "evadav.com",
     "onclicksuper.com", "onclickalgo.com", "onclickbright.com",
-    "ad-delivery.net", "highperformanceformat.com", "effectivegate.com",
-    "effectivecpmgate.com", "profitablegatecpm.com", "doublepimp.com",
-    "bestcpmgate.com", "alwingulla.com", "bidgear.com", "delivertrk.com",
-    "realsrv.com", "adnxs.com", "admob.com", "adskeeper.co.uk",
-    "mgid.com", "zeroredirect.com", "onclickperformance.com"
+    "onclickperformance.com", "ad-delivery.net", "highperformanceformat.com",
+    "effectivegate.com", "effectivecpmgate.com", "profitablegatecpm.com",
+    "doublepimp.com", "bestcpmgate.com", "alwingulla.com", "bidgear.com",
+    "delivertrk.com", "realsrv.com", "adnxs.com", "adskeeper.co.uk",
+    "mgid.com", "zeroredirect.com"
   ];
 
-  function isAdPopup(host, href) {
-    if (!host) return false;
+  function isAdNetworkHost(host) {
     for (var i = 0; i < POPUP_AD_DOMAINS.length; i++) {
-      if (host === POPUP_AD_DOMAINS[i] || host.endsWith("." + POPUP_AD_DOMAINS[i])) return true;
+      var d = POPUP_AD_DOMAINS[i];
+      if (host === d || host.slice(-d.length - 1) === "." + d) return true;
     }
-    for (var j = 0; j < POPUP_AD_PATTERNS.length; j++) {
-      if (host.indexOf(POPUP_AD_PATTERNS[j]) !== -1) return true;
-    }
-    return !!(href && /(\?|&)(click_id|aff_id|pub_id|offer_id|camp_id|zoneid|pop_id)=/i.test(href));
+    return false;
   }
 
   function checkAndClose(settings) {
@@ -60,8 +59,10 @@
     if (settings.adBlock === false) return;
     if (isWhitelisted(hostname, settings.whitelist || [])) return;
     try {
-      var href = window.location.href.toLowerCase();
-      if (isAdPopup(hostname, href)) window.close();
+      // Popunders are opened by a page's script, so they have an opener. A
+      // page the user opened (typed, bookmarked, a normal link) has none.
+      if (!window.opener) return;
+      if (isAdNetworkHost(hostname)) window.close();
     } catch (_) {}
   }
 

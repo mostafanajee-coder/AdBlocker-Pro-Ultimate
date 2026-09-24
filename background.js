@@ -258,8 +258,14 @@ async function syncDynamicFilters(settings, forceRebuild) {
   }
 }
 
+// Created only when missing. chrome.alarms.create() replaces an existing alarm
+// of the same name, and this runs on every service-worker start (a blocked
+// ad, a tab switch...), so recreating it kept pushing the first refresh an
+// hour away and the daily refresh never ran for an active user.
 try {
-  chrome.alarms.create("filterRefresh", { periodInMinutes: 24 * 60, delayInMinutes: 60 });
+  chrome.alarms.get("filterRefresh", function (existing) {
+    if (!existing) chrome.alarms.create("filterRefresh", { periodInMinutes: 24 * 60, delayInMinutes: 60 });
+  });
 } catch (_) {}
 
 chrome.alarms.onAlarm.addListener(function (alarm) {
@@ -309,9 +315,9 @@ function defaultsMigrationPatch(reason, stored) {
 
 const BLOCK_MENU_ID = "abp-block-element";
 
-// Never offered on the sites with dedicated modules (the same list the
-// site-specific hiding skips): a saved element rule applied to Facebook's
-// feed wrapper is what once blanked the whole feed.
+// The picker never runs on the sites with dedicated modules (the same list
+// the site-specific hiding skips): a saved element rule applied to
+// Facebook's feed wrapper is what once blanked the whole feed.
 function isBlockMenuExcluded(url) {
   try {
     const u = new URL(url);
@@ -322,6 +328,14 @@ function isBlockMenuExcluded(url) {
   }
 }
 
+// Created on every service-worker start, not only on install: a reload from
+// chrome://extensions or a browser restart must never leave the entry
+// missing. removeAll() first keeps it to a single entry.
+//
+// The entry is always visible on web pages. Hiding it per tab (shown on
+// ordinary sites, hidden on Facebook) depended on catching every tab switch
+// and left it hidden: after a reload the active tab is chrome://extensions,
+// so the entry was hidden straight away. Excluded sites are handled on click.
 function installBlockMenu() {
   if (!chrome.contextMenus) return;
   let ar = false;
@@ -332,46 +346,26 @@ function installBlockMenu() {
       title: ar ? "حجب هذا العنصر" : "Block this element",
       contexts: ["all"],
       documentUrlPatterns: ["http://*/*", "https://*/*"]
-    }, function () {
-      void chrome.runtime.lastError;
-      syncBlockMenuForActiveTab();
-    });
+    }, function () { void chrome.runtime.lastError; });
   });
 }
 
-// Chrome has no per-page "menu about to show" event, so the entry is hidden
-// while the active tab is one of the excluded sites. The click handler and
-// content.js both check again, since visibility can lag a navigation.
-function syncBlockMenuFor(url) {
-  if (!chrome.contextMenus) return;
-  chrome.contextMenus.update(BLOCK_MENU_ID, { visible: !isBlockMenuExcluded(url || "") }, function () {
-    void chrome.runtime.lastError;
-  });
-}
-
-function syncBlockMenuForActiveTab() {
-  chrome.tabs.query({ active: true, lastFocusedWindow: true }, function (tabs) {
-    if (tabs && tabs[0]) syncBlockMenuFor(tabs[0].url);
-  });
-}
+installBlockMenu();
 
 if (chrome.contextMenus) {
-  chrome.tabs.onActivated.addListener(syncBlockMenuForActiveTab);
-  chrome.tabs.onUpdated.addListener(function (tabId, change, tab) {
-    if (change.url && tab && tab.active) syncBlockMenuFor(change.url);
-  });
-  if (chrome.windows && chrome.windows.onFocusChanged) {
-    chrome.windows.onFocusChanged.addListener(syncBlockMenuForActiveTab);
-  }
   chrome.contextMenus.onClicked.addListener(function (info, tab) {
     if (info.menuItemId !== BLOCK_MENU_ID || !tab || tab.id === undefined || tab.id < 0) return;
-    // Both the page and the right-clicked frame: an embedded Facebook widget
-    // on another site is still Facebook.
-    if (isBlockMenuExcluded(info.pageUrl || tab.url || "")) return;
-    if (info.frameUrl && isBlockMenuExcluded(info.frameUrl)) return;
+    const pageUrl = info.pageUrl || tab.url || "";
+    let pageHost = "";
+    try { pageHost = new URL(pageUrl).protocol.indexOf("http") === 0 ? new URL(pageUrl).hostname : ""; } catch (_) {}
+    if (!pageHost) return; // not an ordinary web page
     const options = typeof info.frameId === "number" ? { frameId: info.frameId } : {};
+    // Both the page and the right-clicked frame: an embedded Facebook widget
+    // on another site is still Facebook. There the picker never starts; the
+    // page only tells the user it is not available.
+    const excluded = isBlockMenuExcluded(pageUrl) || (info.frameUrl && isBlockMenuExcluded(info.frameUrl));
     try {
-      chrome.tabs.sendMessage(tab.id, { type: "ABP_BLOCK_ELEMENT" }, options, function () {
+      chrome.tabs.sendMessage(tab.id, { type: excluded ? "ABP_BLOCK_UNAVAILABLE" : "ABP_BLOCK_ELEMENT" }, options, function () {
         void chrome.runtime.lastError;
       });
     } catch (_) {}
@@ -380,7 +374,6 @@ if (chrome.contextMenus) {
 
 chrome.runtime.onInstalled.addListener(function (details) {
   const reason = details && details.reason;
-  installBlockMenu();
   // Rules saved by earlier versions are no longer applied anywhere; drop them.
   chrome.storage.local.remove("customUserRules").catch(function () {}).then(function () {
     return chrome.storage.local.get(SETTING_KEYS.concat([DEFAULTS_REVISION_KEY]));
@@ -397,7 +390,6 @@ chrome.runtime.onInstalled.addListener(function (details) {
 });
 
 chrome.runtime.onStartup.addListener(function () {
-  installBlockMenu();
   readSettings().then(function (data) {
     return syncRuntimeState(mergedSettings(data));
   }).catch(function (e) {
@@ -412,6 +404,21 @@ readSettings().then(function (data) {
 }).catch(function () {});
 
 /* Badge: live count of blocked items reported by page modules. */
+
+// Per-tab running count for the badge. Modules either report their own
+// running total for the page (facebook.js: `total`) or one item at a time
+// (twitter.js / instagram.js: `count: 1`), so the badge keeps its own sum.
+// In memory only: after a service-worker restart it resumes from the next
+// report, which is fine for a badge.
+const tabBlocked = new Map();
+
+chrome.tabs.onUpdated.addListener(function (tabId, change) {
+  if (change.status === "loading" && change.url) tabBlocked.delete(tabId);
+});
+chrome.tabs.onRemoved.addListener(function (tabId) {
+  tabBlocked.delete(tabId);
+});
+
 function paintBadge(tabId, count) {
   if (tabId === undefined || tabId === null || tabId < 0) return;
   try {
@@ -470,12 +477,23 @@ chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
   switch (msg.type) {
     case "abpBlocked":
     case "adBlocked": {
-      paintBadge(sender.tab && sender.tab.id, msg.count);
+      // `added` is how many were newly blocked since the module's last
+      // report; older single-item reports send `count: 1`. Adding a running
+      // total here instead (as before) counted 1+2+3 = 6 for three ads.
+      const tabId = sender.tab && sender.tab.id;
+      const added = typeof msg.added === "number" ? msg.added : (msg.count || 1);
+      const tabTotal = typeof msg.total === "number"
+        ? msg.total
+        : (tabBlocked.get(tabId) || 0) + Math.max(0, added);
+      if (tabId !== undefined && tabId !== null) tabBlocked.set(tabId, tabTotal);
+      paintBadge(tabId, tabTotal);
+      if (added <= 0) return false; // e.g. a hidden reel given back
+
       const todayStr = new Date().toISOString().slice(0, 10);
       chrome.storage.local.get(["totalBlocked", "todayBlocked", "lastBlockedDate"], function (d) {
-        const tot = ((d && d.totalBlocked) || 0) + (msg.count || 1);
+        const tot = ((d && d.totalBlocked) || 0) + added;
         const lastDate = (d && d.lastBlockedDate) || "";
-        const tod = (lastDate === todayStr) ? (((d && d.todayBlocked) || 0) + (msg.count || 1)) : (msg.count || 1);
+        const tod = (lastDate === todayStr) ? (((d && d.todayBlocked) || 0) + added) : added;
         chrome.storage.local.set({ totalBlocked: tot, todayBlocked: tod, lastBlockedDate: todayStr });
       });
       return false;
