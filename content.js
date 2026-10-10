@@ -51,6 +51,8 @@
 
   function applyCosmeticFilters(settings, site) {
     if (!settings.adBlock && !settings.antiAdblock) return;
+    // Facebook's dedicated detector owns hiding, including embedded frames.
+    if (/(^|\.)(facebook\.com|messenger\.com)$/i.test(window.location.hostname)) return;
     site = site || { hide: [], unhide: Object.create(null) };
 
     var builtin = [

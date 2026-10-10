@@ -59,6 +59,22 @@
 
   if (window.__abpNetProbeInstalled) return;
   window.__abpNetProbeInstalled = true;
+  var stopped = false;
+  var shadowObservers = new Set();
+  function stopProbe() {
+    if (stopped) return;
+    stopped = true;
+    shadowObservers.forEach(function (observer) { try { observer.disconnect(); } catch (_) {} });
+    shadowObservers.clear();
+    // Restore only hooks still owned by this probe; preserve later page hooks.
+    if (Element.prototype.attachShadow === shadowHook) Element.prototype.attachShadow = __abpOrigAttachShadow;
+    if (OrigXHR && OrigXHR.prototype.open === openHook) OrigXHR.prototype.open = origOpen;
+    if (OrigXHR && OrigXHR.prototype.send === sendHook) OrigXHR.prototype.send = origSend;
+    document.removeEventListener("__abpFacebookProbeStop", stopProbe);
+  }
+  // This channel can only tear down instrumentation. Future injections are
+  // controlled by extension-owned registration settings and excludeMatches.
+  document.addEventListener("__abpFacebookProbeStop", stopProbe);
 
   // Exact sponsorship-disclosure labels (subset of fb-detect.js's SPONSORED
   // list — kept in sync manually since this file runs in a separate world
@@ -77,14 +93,16 @@
 
   try {
     var __abpOrigAttachShadow = Element.prototype.attachShadow;
-    Element.prototype.attachShadow = function (init) {
+    var shadowHook = function (init) {
       var root = __abpOrigAttachShadow.call(this, init);
-      try { __abpWatchShadowForDisclosure(this, root); } catch (_) {}
+      if (!stopped) { try { __abpWatchShadowForDisclosure(this, root); } catch (_) {} }
       return root;
     };
+    Element.prototype.attachShadow = shadowHook;
 
     function __abpWatchShadowForDisclosure(host, root) {
       function checkNow() {
+        if (stopped) return false;
         var text;
         try { text = (root.textContent || "").replace(/\s+/g, " ").trim(); } catch (_) { return false; }
         if (!text) return false;
@@ -95,13 +113,14 @@
       if (checkNow()) return;
       try {
         var mo = new MutationObserver(function () {
-          if (checkNow()) { try { mo.disconnect(); } catch (_) {} }
+          if (checkNow()) { try { mo.disconnect(); } catch (_) {} shadowObservers.delete(mo); }
         });
         mo.observe(root, { childList: true, subtree: true, characterData: true });
+        shadowObservers.add(mo);
         // Bounded: most shadow roots here are short-lived UI bits (a CTA
         // button's label, etc.) that will never match — stop watching each
         // one after a few seconds so observers don't accumulate forever.
-        setTimeout(function () { try { mo.disconnect(); } catch (_) {} }, 5000);
+        setTimeout(function () { try { mo.disconnect(); } catch (_) {} shadowObservers.delete(mo); }, 5000);
       } catch (_) {}
     }
   } catch (_) {}
@@ -122,6 +141,7 @@
   }
 
   function countSponsored(text) {
+    if (stopped) return;
     try {
       var m = text.match(/"__typename":"SponsoredData"/g);
       if (m) {
@@ -222,14 +242,15 @@
     var OrigXHR = window.XMLHttpRequest;
     var origOpen = OrigXHR.prototype.open;
     var origSend = OrigXHR.prototype.send;
-    OrigXHR.prototype.open = function (method, url) {
+    var openHook = function (method, url) {
       this.__abpUrl = url;
       return origOpen.apply(this, arguments);
     };
-    OrigXHR.prototype.send = function () {
+    var sendHook = function () {
       var xhr = this;
-      if (xhr.__abpUrl && String(xhr.__abpUrl).indexOf("/api/graphql/") !== -1) {
+      if (!stopped && xhr.__abpUrl && String(xhr.__abpUrl).indexOf("/api/graphql/") !== -1) {
         xhr.addEventListener("load", function () {
+          if (stopped) return;
           try {
             if (typeof xhr.responseText === "string" && xhr.responseText.indexOf("SponsoredData") !== -1) {
               countSponsored(xhr.responseText);
@@ -239,5 +260,7 @@
       }
       return origSend.apply(this, arguments);
     };
+    OrigXHR.prototype.open = openHook;
+    OrigXHR.prototype.send = sendHook;
   } catch (_) {}
 })();

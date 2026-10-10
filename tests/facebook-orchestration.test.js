@@ -160,18 +160,25 @@ function matchesSelector(element, selector) {
 class FakeStyle {
   constructor() {
     this.values = Object.create(null);
+    this.priorities = Object.create(null);
   }
 
-  setProperty(name, value) {
+  setProperty(name, value, priority) {
     this.values[name] = String(value);
+    this.priorities[name] = priority || "";
   }
 
   removeProperty(name) {
     delete this.values[name];
+    delete this.priorities[name];
   }
 
   getPropertyValue(name) {
     return this.values[name] || "";
+  }
+
+  getPropertyPriority(name) {
+    return this.priorities[name] || "";
   }
 
   toString() {
@@ -393,6 +400,7 @@ class FakeDocument extends FakeNode {
   dispatch(type, target) {
     for (const listener of (this.listeners && this.listeners[type]) || []) listener({ type, target });
   }
+  dispatchEvent(event) { this.dispatch(event.type, this); return true; }
   hasFocus() { return true; }
 }
 
@@ -521,7 +529,7 @@ function createHarness(options = {}) {
   const listeners = [];
   const chrome = {
     storage: {
-      local: { get: (_keys, callback) => callback({}) },
+      local: { get: (_keys, callback) => callback(options.settings || {}) },
       onChanged: { addListener: (callback) => listeners.push(callback) }
     },
     runtime: { sendMessage: (msg) => { if (options.messages) options.messages.push(msg); return { catch: () => {} }; } }
@@ -550,6 +558,7 @@ function createHarness(options = {}) {
     document: doc,
     chrome,
     MutationObserver: TestMutationObserver,
+    CustomEvent: class { constructor(type) { this.type = type; } },
     NodeFilter: { SHOW_TEXT: 4 },
     getComputedStyle: styleFor,
     setTimeout: (callback) => scheduler.setTimeout(callback),
@@ -579,7 +588,14 @@ function createHarness(options = {}) {
     scheduler.flush();
   }
 
-  return { doc, main, sidebar, scheduler, state, window: windowObject, mutate };
+  return { doc, main, sidebar, scheduler, state, window: windowObject, mutate,
+    changeSettings(patch) {
+      const changes = {};
+      for (const key of Object.keys(patch)) changes[key] = { newValue: patch[key] };
+      listeners.forEach((listener) => listener(changes, "local"));
+      scheduler.flush();
+    }
+  };
 }
 
 function card(harness, extraAttrs) {
@@ -899,49 +915,59 @@ function reelViewerAd(h) {
   return { adReel, video };
 }
 
-// The fake scheduler runs queued callbacks instantly, ignoring their delay,
-// so step until the skip attempt has muted the ad (before its 700ms check).
-function stepUntil(h, done) {
-  let guard = 0;
-  while (!done() && h.scheduler.queue.length && guard++ < 20) h.scheduler.queue.shift()();
-}
-
-section("12. On the Reels viewer a sponsored reel is skipped, never blacked out", () => {
+section("12. A confirmed Reels ad is covered before the viewer advances", () => {
   const h = createHarness();
   h.window.location.pathname = "/reel/1";
+  const next = nextButton(h, "Next Card", true);
   const { adReel, video } = reelViewerAd(h);
-
-  h.scheduler.tickInterval(0);
-  stepUntil(h, () => video.muted === true);
-
-  check("the ad reel is never marked hidden on the viewer", isBlocked(adReel), false);
-  check("no display:none is applied to the slide", adReel.style.getPropertyValue("display"), "");
-  check("its audio is muted while the skip is attempted", video.muted, true);
-  check("it is not paused on screen (a paused slide is what showed black)", video.__paused, undefined);
-
-  // The viewer never moved to the next reel: the skip did not take.
-  h.scheduler.flush();
-  check("sound comes back when the skip did not take", video.muted, false);
-  check("the ad is left playing rather than hidden", isBlocked(adReel), false);
+  const clickNext = next.click;
+  next.click = function () {
+    next.__coverAtClick = adReel.getAttribute("data-abp-reel-cover");
+    next.__pausedAtClick = video.__paused === true;
+    clickNext();
+  };
+  adReel.style.setProperty("visibility", "visible");
+  adReel.style.setProperty("opacity", "0.8");
 
   h.scheduler.tickInterval(0);
   h.scheduler.flush();
-  check("the same creative is not retried (no repeated muting)", video.muted, false);
+
+  check("the ad reel is marked as hidden", adReel.getAttribute("data-abp-reel-hidden"), "sponsored");
+  check("the original inline visibility is preserved", adReel.style.getPropertyValue("visibility"), "visible");
+  check("the original inline opacity is preserved", adReel.style.getPropertyValue("opacity"), "0.8");
+  const reelStyles = h.doc.head.querySelectorAll("style");
+  check("the scoped cover stylesheet hides marked Reels", reelStyles.some((s) => s.textContent.includes('[data-abp-reel-cover="1"]') && s.textContent.includes("visibility: hidden")), true);
+  check("the slide keeps its layout box", adReel.getBoundingClientRect().height, 800);
+  check("the slide is not removed from layout", adReel.style.getPropertyValue("display"), "");
+  check("the active ad is muted without pausing its player", video.__paused !== true && video.muted === true, true);
+  check("the ad is covered before Facebook is advanced", next.__coverAtClick, "1");
+  check("the player is not paused before the transition", next.__pausedAtClick, false);
+  check("the covered ad advances exactly once", next.__clicks, 1);
+  check("the route remains on the same reel", h.window.location.pathname, "/reel/1");
 });
 
-section("13. On the Reels viewer a skip that works pauses the ad off screen", () => {
+section("13. Leaving the viewer releases the cover and stops the old media", () => {
   const h = createHarness();
   h.window.location.pathname = "/reel/1";
+  const next = nextButton(h, "Next Card", true);
   const { adReel, video } = reelViewerAd(h);
+  adReel.style.setProperty("visibility", "visible");
+  adReel.style.setProperty("opacity", "0.8");
 
   h.scheduler.tickInterval(0);
-  stepUntil(h, () => video.muted === true);
-
-  h.window.location.pathname = "/reel/2"; // Facebook moved on to the next reel
   h.scheduler.flush();
-  check("the skipped ad is paused so its audio cannot leak", video.__paused, true);
-  check("the node gets its original sound state back", video.muted, false);
-  check("the slide itself is still never display:none'd", isBlocked(adReel), false);
+  check("the ad is covered before the route changes", adReel.getAttribute("data-abp-reel-cover"), "1");
+
+  h.window.location.pathname = "/?ref=feed";
+  h.scheduler.tickInterval(1);
+  check("the cover is removed on route change", adReel.getAttribute("data-abp-reel-cover"), null);
+  check("the ad hidden marker is released", adReel.getAttribute("data-abp-reel-hidden"), null);
+  check("the original visibility style stays intact", adReel.style.getPropertyValue("visibility"), "visible");
+  check("the original opacity style stays intact", adReel.style.getPropertyValue("opacity"), "0.8");
+  check("the original audio state is restored", video.muted, false);
+  check("the old video stays paused after leaving", video.__paused, true);
+  check("the old ad is not restarted on the feed", video.__played !== true, true);
+  check("the route change does not click Next Card a second time", next.__clicks, 1);
 });
 
 section("14. A hidden card later reused to wrap the feed is given back", () => {
@@ -1011,7 +1037,7 @@ function nextButton(h, label, visible) {
   return btn;
 }
 
-section("16. A reel's \"Ad\" label is found even deep inside the slide", () => {
+section("16. A reel's \"Ad\" label is hidden even when deep inside the slide", () => {
   const h = createHarness();
   h.window.location.pathname = "/reel/1";
   const slide = h.doc.createElement("div");
@@ -1031,12 +1057,15 @@ section("16. A reel's \"Ad\" label is found even deep inside the slide", () => {
   h.main.appendChild(slide);
 
   h.scheduler.tickInterval(0);
-  stepUntil(h, () => video.muted === true);
-  check("the ad reel is recognised and a skip is attempted", video.muted, true);
-  check("the attempt is recorded for diagnosis", String(slide.getAttribute("data-abp-reel-skip")).indexOf("tried:") === 0, true);
+  h.scheduler.flush();
+  check("the ad reel is recognised and hidden", slide.getAttribute("data-abp-reel-hidden"), "sponsored-reel");
+  check("the ad carries the scoped invisibility marker", slide.getAttribute("data-abp-reel-cover"), "1");
+  check("the reel keeps its layout box", slide.getBoundingClientRect().height, 800);
+  check("the hidden marker is installed", slide.getAttribute("data-abp-reel-cover"), "1");
+  check("the visible ad is muted but not paused into a black frame", video.muted && video.__paused !== true, true);
 });
 
-section("17. Two reels in one container: only the ad reel is acted on, and only once on screen", () => {
+section("17. Two reels in one container: only the ad reel is covered", () => {
   const h = createHarness();
   h.window.location.pathname = "/reel/1";
   const hiddenNext = nextButton(h, "Next", false);
@@ -1065,50 +1094,25 @@ section("17. Two reels in one container: only the ad reel is acted on, and only 
   h.scheduler.tickInterval(0);
   h.scheduler.flush();
   check("the organic reel on screen is left alone", organicVideo.muted, false);
-  check("the ad reel waits while it is still off screen", adVideo.muted, false);
+  check("the off-screen ad is muted before it can play", adVideo.muted, true);
+  check("the off-screen ad is marked hidden", ad.getAttribute("data-abp-reel-hidden"), "sponsored-reel");
   check("nothing is clicked yet", cardNext.__clicks + bareNext.__clicks + hiddenNext.__clicks, 0);
 
   // The user scrolls: the ad reel is now the one on screen.
   organic.rect = { left: 0, top: -900, width: 400, height: 800 };
   ad.rect = { left: 0, top: 0, width: 400, height: 800 };
   h.scheduler.tickInterval(0);
-  stepUntil(h, () => adVideo.muted === true);
-  check("the ad reel is muted once it is on screen", adVideo.muted, true);
-  check("the organic reel is still never touched", organicVideo.muted, false);
-  check("the specific \"Next Card\" control is clicked", cardNext.__clicks, 1);
-  check("the bare \"Next\" and the hidden control are not", bareNext.__clicks + hiddenNext.__clicks, 0);
-  check("what was tried is recorded", ad.getAttribute("data-abp-reel-skip"), "tried:button:Next Card");
-
-  h.window.location.pathname = "/reel/2"; // the viewer moved on
   h.scheduler.flush();
-  check("the result is recorded", h.doc.documentElement.getAttribute("data-abp-reel-skip-last"), "skipped:button:Next Card");
-  check("the skipped ad is paused", adVideo.__paused, true);
+  check("the ad reel is covered when it reaches the viewport", ad.getAttribute("data-abp-reel-cover"), "1");
+  check("the organic reel is still never touched", organicVideo.muted, false);
+  check("only the specific \"Next Card\" control advances", cardNext.__clicks, 1);
+  check("the bare \"Next\" and the hidden control are not", bareNext.__clicks + hiddenNext.__clicks, 0);
+  check("the ad remains paused", adVideo.__paused, true);
   check("the organic reel was never muted at any point", organicVideo.muted, false);
 });
 
-function makeFakeIntersectionObserver() {
-  const instances = [];
-  class FakeIntersectionObserver {
-    constructor(callback) {
-      this.callback = callback;
-      this.targets = new Set();
-      instances.push(this);
-    }
-    observe(target) { this.targets.add(target); }
-    unobserve(target) { this.targets.delete(target); }
-    disconnect() { this.targets.clear(); }
-  }
-  function fire(target, ratio) {
-    for (const io of instances) {
-      if (io.targets.has(target)) io.callback([{ target, isIntersecting: ratio > 0, intersectionRatio: ratio }]);
-    }
-  }
-  return { FakeIntersectionObserver, fire, instances };
-}
-
-section("18. A reel ad loaded ahead of time is covered as it arrives and skipped at once", () => {
-  const io = makeFakeIntersectionObserver();
-  const h = createHarness({ IntersectionObserver: io.FakeIntersectionObserver });
+section("18. A preloaded reel ad stays covered and advances when it becomes active", () => {
+  const h = createHarness();
   h.window.location.pathname = "/reel/1";
   const cardNext = nextButton(h, "Next Card", true);
 
@@ -1131,72 +1135,91 @@ section("18. A reel ad loaded ahead of time is covered as it arrives and skipped
 
   h.scheduler.tickInterval(0);
   h.scheduler.flush();
-  check("the ad, still off screen, is not covered yet", ad.getAttribute("data-abp-reel-cover"), null);
-  check("but it is already being watched", io.instances.some((i) => i.targets.has(ad)), true);
+  check("the ad is identified before it reaches the viewport", ad.getAttribute("data-abp-reel-hidden"), "sponsored-reel");
+  check("the off-screen ad remains in layout", ad.style.getPropertyValue("display"), "");
+  check("the off-screen ad carries the invisibility marker", ad.getAttribute("data-abp-reel-cover"), "1");
 
   // The user starts moving to it: its first pixels come into view.
   ad.rect = { left: 0, top: 860, width: 400, height: 800 };
-  io.fire(ad, 0.05);
-  check("covered from its first visible pixel", ad.style.getPropertyValue("opacity"), "0");
+  h.scheduler.tickInterval(0);
+  h.scheduler.flush();
+  check("covered from its first visible pixel", ad.getAttribute("data-abp-reel-cover"), "1");
   check("its sound is already off", adVideo.muted, true);
-  check("not skipped before it arrives", cardNext.__clicks, 0);
+  check("not navigated before it arrives", cardNext.__clicks, 0);
 
   // It arrives.
   organic.rect = { left: 0, top: -900, width: 400, height: 800 };
   ad.rect = { left: 0, top: 0, width: 400, height: 800 };
-  io.fire(ad, 1);
-  check("skipped the moment it arrives, without waiting for a sweep", cardNext.__clicks, 1);
-  check("still covered while the skip completes", ad.style.getPropertyValue("opacity"), "0");
-
-  h.window.location.pathname = "/reel/556";
+  h.scheduler.tickInterval(0);
   h.scheduler.flush();
-  check("the cover is removed once it is skipped", ad.style.getPropertyValue("opacity"), "");
-  check("the skipped ad is paused off screen", adVideo.__paused, true);
+  check("it remains covered when it arrives", ad.getAttribute("data-abp-reel-cover"), "1");
+  check("the already-offscreen ad stays paused", adVideo.__paused, true);
   check("the organic reel is never touched", organicVideo.muted, false);
+  check("the covered ad advances as it arrives", cardNext.__clicks, 1);
 });
 
-section("19. If both skip attempts fail, the ad is uncovered and plays rather than staying dark", () => {
+section("19. A covered ad advances once and is not repeatedly navigated", () => {
   const h = createHarness();
   h.window.location.pathname = "/reel/1";
   const cardNext = nextButton(h, "Next Card", true);
   const { adReel, video } = reelViewerAd(h);
-
-  h.scheduler.tickInterval(0);
-  stepUntil(h, () => video.muted === true);
-  check("covered while the skip is attempted", adReel.style.getPropertyValue("opacity"), "0");
-
-  h.scheduler.flush(); // the viewer never moves
-  check("a second attempt is made before giving up", cardNext.__clicks, 2);
-  check("the outcome is recorded", adReel.getAttribute("data-abp-reel-skip"), "not-skipped:button:Next Card");
-  check("the cover is removed", adReel.style.getPropertyValue("opacity"), "");
-  check("its sound is back", video.muted, false);
 
   h.scheduler.tickInterval(0);
   h.scheduler.flush();
-  check("it is not retried after giving up", cardNext.__clicks, 2);
+  check("the ad remains covered", adReel.getAttribute("data-abp-reel-cover"), "1");
+  check("the ad remains muted", video.muted, true);
+  check("the active ad is not paused before moving on", video.__paused !== true, true);
+  check("the covered ad advances once", cardNext.__clicks, 1);
+
+  h.scheduler.tickInterval(0);
+  h.scheduler.flush();
+  check("a later sweep does not advance it again", cardNext.__clicks, 1);
 });
 
-section("20. Scrolling back to an ad that was skipped skips it again", () => {
+section("20. Advancing to the next Reel keeps the old ad covered without freezing it", () => {
   const h = createHarness();
   h.window.location.pathname = "/reel/1";
-  const cardNext = nextButton(h, "Next Card", true);
+  const next = nextButton(h, "Next Card", true);
   const { adReel, video } = reelViewerAd(h);
 
   h.scheduler.tickInterval(0);
-  stepUntil(h, () => video.muted === true);
+  h.scheduler.flush();
+  check("the ad is covered before advancing", adReel.getAttribute("data-abp-reel-cover"), "1");
+  check("the active player is not paused into a black frame", video.__paused !== true, true);
+  check("the explicit next control is clicked once", next.__clicks, 1);
+
   h.window.location.pathname = "/reel/2";
+  h.scheduler.tickInterval(1);
   h.scheduler.flush();
-  check("first pass: skipped", adReel.getAttribute("data-abp-reel-skip"), "skipped:button:Next Card");
-
-  // The user goes back up: the viewer returns to the ad.
-  h.window.location.pathname = "/reel/1";
-  h.scheduler.tickInterval(0);
-  stepUntil(h, () => video.muted === true);
-  check("covered again on the way back", adReel.style.getPropertyValue("opacity"), "0");
-  check("and skipped again", cardNext.__clicks, 2);
+  check("the transition does not reveal the old ad", adReel.getAttribute("data-abp-reel-cover"), "1");
+  check("the old player is still muted", video.muted, true);
+  check("the old player was not resumed", video.__played !== true, true);
+  check("the transition does not click Next Card again", next.__clicks, 1);
 });
 
-section("21. A reel whose only ad sign is the hidden (shadow DOM) label is still skipped", () => {
+section("21. Leaving and returning covers and advances the creative once per visit", () => {
+  const h = createHarness();
+  h.window.location.pathname = "/reel/1";
+  const cardNext = nextButton(h, "Next Card", true);
+  const { adReel, video } = reelViewerAd(h);
+
+  h.scheduler.tickInterval(0);
+  h.scheduler.flush();
+  check("first pass covers the ad", adReel.getAttribute("data-abp-reel-cover"), "1");
+  h.window.location.pathname = "/?ref=feed";
+  h.scheduler.tickInterval(1);
+  check("leaving releases the ad", adReel.getAttribute("data-abp-reel-hidden"), null);
+
+  // Returning to the viewer detects the same ad again and covers it again.
+  h.window.location.pathname = "/reel/1";
+  h.scheduler.tickInterval(0);
+  h.scheduler.flush();
+  check("covered again on return", adReel.getAttribute("data-abp-reel-cover"), "1");
+  check("the returned ad advances once more", cardNext.__clicks, 2);
+  check("the ad is muted again", video.muted, true);
+});
+
+section("22. A reel whose only ad sign is the hidden (shadow DOM) label is covered", () => {
   const h = createHarness();
   h.window.location.pathname = "/reel/1";
   const cardNext = nextButton(h, "Next Card", true);
@@ -1213,12 +1236,44 @@ section("21. A reel whose only ad sign is the hidden (shadow DOM) label is still
   check("nothing readable in the DOM marks it as an ad", video.muted, false);
 
   h.doc.dispatch("__abpShadowSponsoredDetected", host);
-  check("the shadow-DOM signal gets it skipped", cardNext.__clicks, 1);
-  check("it is covered meanwhile", slide.style.getPropertyValue("opacity"), "0");
-  check("and muted", video.muted, true);
+  check("the shadow-DOM signal hides it", slide.getAttribute("data-abp-reel-hidden"), "shadow-dom-ad");
+  check("it is covered in place", slide.getAttribute("data-abp-reel-cover"), "1");
+  check("it is muted without freezing a black frame", video.__paused !== true && video.muted === true, true);
+  check("the covered ad advances through Next Card", cardNext.__clicks, 1);
 });
 
-section("22. The cover spans the whole reel, including its like/comment column", () => {
+section("23. A hidden Shadow DOM template is rejected instead of blanking an organic Reel", () => {
+  const h = createHarness();
+  h.window.location.pathname = "/reel/organic";
+  const cardNext = nextButton(h, "Next Card", true);
+
+  const slide = h.doc.createElement("div");
+  slide.rect = { left: 0, top: 0, width: 400, height: 800 };
+  const video = stubVideo(h);
+  const template = h.doc.createElement("div");
+  template.style.setProperty("display", "none");
+  const host = h.doc.createElement("span");
+  host.rect = { left: 0, top: 0, width: 0, height: 0 };
+  template.appendChild(host);
+  slide.append(video, template);
+  h.main.appendChild(slide);
+
+  h.doc.dispatch("__abpShadowSponsoredDetected", host);
+  check("the hidden zero-size template is not treated as an ad", slide.getAttribute("data-abp-reel-hidden"), null);
+  check("the organic Reel remains visible", slide.getAttribute("data-abp-reel-cover"), null);
+  check("its video is not paused or muted", video.__paused !== true && video.muted === false, true);
+  check("the viewer is not advanced", cardNext.__clicks, 0);
+  check("the false-positive is recorded for diagnostics", h.doc.documentElement.getAttribute("data-abp-shadow-signal-rejected"), "1");
+
+  // Some hidden templates retain a nonzero box but are suppressed by an
+  // ancestor's computed display state; that must be rejected too.
+  host.rect = { left: 0, top: 0, width: 12, height: 12 };
+  h.doc.dispatch("__abpShadowSponsoredDetected", host);
+  check("a host inside a display:none ancestor is also rejected", h.doc.documentElement.getAttribute("data-abp-shadow-signal-rejected"), "2");
+  check("the hidden ancestor cannot trigger navigation", cardNext.__clicks, 0);
+});
+
+section("24. Hiding the reel keeps its layout dimensions", () => {
   const h = createHarness();
   h.window.location.pathname = "/reel/1";
   const next = nextButton(h, "Next Card", true);
@@ -1237,37 +1292,34 @@ section("22. The cover spans the whole reel, including its like/comment column",
   h.main.appendChild(slide);
 
   h.scheduler.tickInterval(0);
-  stepUntil(h, () => video.muted === true);
-  check("the whole reel is covered", slide.style.getPropertyValue("opacity"), "0");
-  check("not just the box around the video", videoBox.style.getPropertyValue("opacity"), "");
-
-  h.window.location.pathname = "/reel/43"; // the first click worked
   h.scheduler.flush();
-  check("one ad gets exactly one skip, so the reel after it is not skipped too", next.__clicks, 1);
+  check("the whole reel carries the invisibility marker", slide.getAttribute("data-abp-reel-cover"), "1");
+  check("the reel height stays intact to avoid snapping", slide.getBoundingClientRect().height, 800);
+  check("not just the box around the video", videoBox.style.getPropertyValue("opacity"), "");
+  check("the covered Reel advances exactly once", next.__clicks, 1);
 });
 
-section("23. A skipped ad stays covered while it slides out, and is uncovered once it is gone", () => {
+section("25. A hidden ad stops painting when it leaves the viewport", () => {
   const h = createHarness();
   h.window.location.pathname = "/reel/1";
-  nextButton(h, "Next Card", true);
+  const next = nextButton(h, "Next Card", true);
   const { adReel, video } = reelViewerAd(h);
 
   h.scheduler.tickInterval(0);
-  stepUntil(h, () => video.muted === true);
+  h.scheduler.flush();
+  check("the ad starts covered", adReel.getAttribute("data-abp-reel-cover"), "1");
+  check("the ad is covered without being collapsed", adReel.getAttribute("data-abp-reel-cover"), "1");
 
-  // The viewer starts moving on: the ad is leaving the centre but still on screen.
-  adReel.rect = { left: 0, top: 600, width: 400, height: 800 };
-  stepUntil(h, () => String(adReel.getAttribute("data-abp-reel-skip")).indexOf("skipped:") === 0);
-  check("the skip is confirmed", String(adReel.getAttribute("data-abp-reel-skip")).indexOf("skipped:") === 0, true);
-  check("still covered while it slides out", adReel.style.getPropertyValue("opacity"), "0");
-
-  adReel.rect = { left: 0, top: 950, width: 400, height: 800 }; // fully off screen
-  stepUntil(h, () => adReel.style.getPropertyValue("opacity") === "");
-  check("uncovered once it has left the screen", adReel.style.getPropertyValue("opacity"), "");
-  check("its sound state is restored for reuse", video.muted, false);
+  // The user scrolls away; the hidden ad stays absent and silent.
+  adReel.rect = { left: 0, top: 950, width: 400, height: 800 };
+  h.scheduler.tickInterval(0);
+  h.scheduler.flush();
+  check("the ad remains covered off-screen", adReel.getAttribute("data-abp-reel-cover"), "1");
+  check("the ad stays silent off-screen", video.muted, true);
+  check("the Reel is advanced once, not again during scrolling", next.__clicks, 1);
 });
 
-section("24. When Reels opens full width, the whole reel is still covered", () => {
+section("26. When Reels opens full width, the whole reel is still covered", () => {
   const h = createHarness();
   h.window.location.pathname = "/reel/1";
   h.window.innerWidth = 500;
@@ -1287,11 +1339,12 @@ section("24. When Reels opens full width, the whole reel is still covered", () =
   h.main.appendChild(slide);
 
   h.scheduler.tickInterval(0);
-  stepUntil(h, () => video.muted === true);
-  check("the full-width reel is covered, caption included", slide.style.getPropertyValue("opacity"), "0");
+  h.scheduler.flush();
+  check("the full-width reel is hidden, caption included", slide.getAttribute("data-abp-reel-cover"), "1");
+  check("the full-width ad is muted but its player is not frozen", video.__paused !== true && video.muted === true, true);
 });
 
-section("25. The cover stops at the reel and never takes in the viewer's Next Card control", () => {
+section("27. The cover stops at the reel and never takes in the viewer's Next Card control", () => {
   const h = createHarness();
   h.window.location.pathname = "/reel/1";
 
@@ -1310,13 +1363,39 @@ section("25. The cover stops at the reel and never takes in the viewer's Next Ca
   h.main.appendChild(viewer);
 
   h.scheduler.tickInterval(0);
-  stepUntil(h, () => video.muted === true);
-  check("the reel is covered", slide.style.getPropertyValue("opacity"), "0");
+  h.scheduler.flush();
+  check("the reel is hidden", slide.getAttribute("data-abp-reel-cover"), "1");
   check("the viewer around it (with Next Card) is not", viewer.style.getPropertyValue("opacity"), "");
-  check("and Next Card is clicked", next.__clicks, 1);
+  check("the Reel advances through Next Card", next.__clicks, 1);
 });
 
-section("26. On a wide screen, an ad label appearing on the reel on screen is acted on at once", () => {
+section("28. A full-screen Reel wrapper is hidden without collapsing its snap box", () => {
+  const h = createHarness();
+  h.window.location.pathname = "/reel/1";
+  h.window.innerWidth = 2048;
+  const next = nextButton(h, "Next Card", true);
+
+  const portal = h.doc.createElement("div");
+  portal.rect = { left: 0, top: 0, width: 2048, height: 900 };
+  const reel = h.doc.createElement("div");
+  reel.rect = { left: 736, top: 0, width: 575, height: 900 };
+  reel.append(
+    stubVideo(h),
+    h.doc.createElement("span").append(text(h, "Sponsored")),
+    h.doc.createElement("div").append(text(h, "Like · Comment · Share"))
+  );
+  portal.appendChild(reel);
+  h.main.appendChild(portal);
+
+  h.scheduler.tickInterval(0);
+  h.scheduler.flush();
+  check("the full-screen Reel slide gets the hide marker", portal.getAttribute("data-abp-reel-cover"), "1");
+  check("the full-screen Reel stays in the layout", portal.style.getPropertyValue("display"), "");
+  check("the Reel keeps its original layout height", portal.getBoundingClientRect().height, 900);
+  check("Facebook's next card button is clicked only after the cover", next.__clicks, 1);
+});
+
+section("29. On a wide screen, an ad label appearing on the reel is covered in place", () => {
   const h = createHarness();
   h.window.location.pathname = "/reel/1";
   h.window.innerWidth = 2000; // the user's screen: full-width Reels is wider than the 1800px feed-card limit
@@ -1336,12 +1415,13 @@ section("26. On a wide screen, an ad label appearing on the reel on screen is ac
   overlay.append(h.doc.createElement("span").append(text(h, "Ad")), h.doc.createElement("a").append(text(h, "Learn more")));
   slide.appendChild(overlay);
   h.state.observer.callback([{ type: "childList", target: slide, addedNodes: [overlay], removedNodes: [] }]);
-  stepUntil(h, () => video.muted === true); // runs only the timers this page change queued
-  check("it is covered straight away, with no periodic sweep involved", slide.style.getPropertyValue("opacity"), "0");
-  check("and skipped", next.__clicks, 1);
+  h.scheduler.flush(); // runs only the timers this page change queued
+  check("it is covered straight away, with no periodic sweep involved", slide.getAttribute("data-abp-reel-cover"), "1");
+  check("the covered ad advances without painting", next.__clicks, 1);
+  check("the active video is muted without a black pause frame", video.__paused !== true && video.muted === true, true);
 });
 
-section("27. Blocked-ad reports carry how many were newly blocked, not a running total to be re-added", () => {
+section("30. Blocked-ad reports carry how many were newly blocked, not a running total to be re-added", () => {
   const messages = [];
   const h = createHarness({ messages });
   const first = card(h);
@@ -1362,7 +1442,7 @@ section("27. Blocked-ad reports carry how many were newly blocked, not a running
   check("no report uses the old ambiguous 'count' field", reports.some((m) => "count" in m), false);
 });
 
-section("28. An ordinary reel is not re-read on every unrelated page change", () => {
+section("31. An ordinary reel is not re-read on every unrelated page change", () => {
   const h = createHarness();
   h.window.location.pathname = "/reel/1";
   const slide = h.doc.createElement("div");
@@ -1393,7 +1473,148 @@ section("28. An ordinary reel is not re-read on every unrelated page change", ()
   slide.appendChild(late);
   h.state.observer.callback([{ type: "childList", target: h.doc.body, addedNodes: [], removedNodes: [] }]);
   h.scheduler.flush();
-  check("a label added to the reel later is still noticed", slide.getAttribute("data-abp-reel-skip") !== null || slide.style.getPropertyValue("opacity") === "0", true);
+  check("a label added to the reel later is still noticed", slide.getAttribute("data-abp-reel-hidden") !== null || slide.getAttribute("data-abp-reel-cover") === "1", true);
+});
+
+section("32. Same-length disclosure changes are detected and the video layer is restored", () => {
+  const h = createHarness();
+  h.window.location.pathname = "/reel/1";
+  const next = nextButton(h, "Next Card", true);
+  const slide = h.doc.createElement("div");
+  slide.rect = { left: 0, top: 0, width: 400, height: 800 };
+  slide.setAttribute("data-pagelet", "ReelViewerRoot");
+  const video = stubVideo(h);
+  video.style.setProperty("visibility", "visible", "important");
+  video.style.setProperty("opacity", "0.8");
+  const badge = h.doc.createElement("span");
+  badge.setAttribute("aria-label", "No thanks"); // same length as "Sponsored"
+  slide.append(video, badge);
+  h.main.appendChild(slide);
+
+  function unrelatedMutation() {
+    h.state.observer.callback([{ type: "attributes", target: h.doc.body, attributeName: "class", addedNodes: [], removedNodes: [] }]);
+    h.scheduler.flush();
+  }
+
+  unrelatedMutation(); // prime the active-reel signature without an ad signal
+  check("the ordinary reel starts uncovered", slide.getAttribute("data-abp-reel-cover"), null);
+
+  // Facebook may change only the disclosure attribute while element count and
+  // text length stay constant. The active-reel check must see that exact change.
+  badge.setAttribute("aria-label", "Sponsored");
+  unrelatedMutation();
+  check("the same-length sponsored label is detected", slide.getAttribute("data-abp-reel-hidden"), "sponsored-reel");
+  check("the video surface is explicitly hidden", video.style.getPropertyValue("visibility"), "hidden");
+  check("the video opacity is zero while covered", video.style.getPropertyValue("opacity"), "0");
+  check("the explicit next control advances the confirmed ad", next.__clicks, 1);
+
+  h.window.location.pathname = "/?ref=feed";
+  h.scheduler.tickInterval(1);
+  check("video visibility is restored on exit", video.style.getPropertyValue("visibility"), "visible");
+  check("video visibility priority is restored", video.style.getPropertyPriority("visibility"), "important");
+  check("video opacity is restored on exit", video.style.getPropertyValue("opacity"), "0.8");
+});
+
+section("33. A card that stays hidden during a slow mount is retried until visible", () => {
+  const h = createHarness();
+  const ad = card(h);
+  ad.style.setProperty("opacity", "0");
+  ad.appendChild(h.doc.createElement("span").append(text(h, "Sponsored")));
+  h.main.appendChild(ad);
+
+  h.state.observer.callback([{ type: "childList", target: h.main, addedNodes: [ad], removedNodes: [] }]);
+  // Run the first retry and its scheduled local sweep, leaving the remaining
+  // insertion retries queued while the card is still in its fade-in state.
+  h.scheduler.queue.shift()();
+  h.scheduler.queue.shift()();
+  for (let i = 0; i < 6; i++) h.scheduler.queue.shift()();
+  check("the ad is not classified while its card is still invisible", isBlocked(ad), false);
+
+  ad.style.setProperty("opacity", "1");
+  h.scheduler.queue.shift()();
+  h.scheduler.flush();
+  check("the ad is hidden on the next retry after the fade-in", isBlocked(ad), true);
+});
+
+section("34. Shadow signals respect disabled settings and live opt-out", () => {
+  for (const settings of [{ adBlock: false }, { fbSponsored: false }]) {
+    const h = createHarness({ settings });
+    h.window.location.pathname = "/reel/1";
+    const next = nextButton(h, "Next Card", true);
+    const { adReel, video } = reelViewerAd(h);
+    const host = h.doc.createElement("span");
+    adReel.appendChild(host);
+    h.doc.dispatch("__abpShadowSponsoredDetected", host);
+    h.scheduler.flush();
+    check("disabled settings reject direct shadow hides", adReel.hasAttribute("data-abp-reel-hidden"), false);
+    check("disabled settings do not navigate or mute", next.__clicks === 0 && !video.muted, true);
+  }
+  const h = createHarness();
+  h.window.location.pathname = "/reel/1";
+  nextButton(h, "Next Card", true);
+  const { adReel, video } = reelViewerAd(h);
+  h.scheduler.tickInterval(0);
+  h.scheduler.flush();
+  let stopSignals = 0;
+  h.doc.addEventListener("__abpFacebookProbeStop", () => { stopSignals++; });
+  h.changeSettings({ fbSponsored: false });
+  check("live disable tells the MAIN-world probe to stop", stopSignals, 1);
+  check("turning Facebook off releases existing Reel covers", adReel.hasAttribute("data-abp-reel-cover"), false);
+  check("turning Facebook off restores audio", video.muted, false);
+  h.changeSettings({ fbSponsored: true });
+  check("turning Facebook back on re-detects the ad", adReel.hasAttribute("data-abp-reel-hidden"), true);
+  h.changeSettings({ whitelist: ["facebook.com"] });
+  check("live whitelist change releases existing covers", adReel.hasAttribute("data-abp-reel-hidden"), false);
+  h.scheduler.tickInterval(0);
+  h.scheduler.flush();
+  check("periodic scans honor the live whitelist", adReel.hasAttribute("data-abp-reel-cover"), false);
+  const initiallyExcluded = createHarness({ settings: { whitelist: ["facebook.com"] } });
+  const post = card(initiallyExcluded);
+  post.appendChild(initiallyExcluded.doc.createElement("span").append(text(initiallyExcluded, "Sponsored")));
+  initiallyExcluded.main.appendChild(post);
+  check("an initially whitelisted page does not start scanning", initiallyExcluded.state.observer, null);
+  initiallyExcluded.changeSettings({ whitelist: [] });
+  check("removing the initial whitelist starts detection", isBlocked(post), true);
+});
+
+section("35. Diagnostic mode outlines without hiding, muting, or counting", () => {
+  const messages = [];
+  const h = createHarness({ settings: { fbDebug: true }, messages });
+  const ad = card(h);
+  const video = stubVideo(h);
+  ad.style.setProperty("outline", "1px solid blue");
+  ad.append(video, h.doc.createElement("span").append(text(h, "Sponsored")));
+  h.main.appendChild(ad);
+  h.mutate({ type: "childList", target: h.main, addedNodes: [ad] });
+  check("debug card has an outline marker", ad.hasAttribute("data-abp-debug"), true);
+  check("debug card has no hiding attribute", isBlocked(ad), false);
+  check("debug media is left playing with its original audio", !video.muted && !video.__paused, true);
+  check("debug detections do not report blocked counts", messages.length, 0);
+  h.changeSettings({ adBlock: false });
+  check("disabling removes debug markers", ad.hasAttribute("data-abp-debug"), false);
+  check("cleanup restores the original outline", ad.style.getPropertyValue("outline"), "1px solid blue");
+});
+
+section("36. Reel advancement confirms transitions and bounds no-op retries", () => {
+  const h = createHarness();
+  h.window.location.pathname = "/reel/1";
+  const ignored = nextButton(h, "Next Card", true);
+  const { adReel } = reelViewerAd(h);
+  h.scheduler.tickInterval(0);
+  h.scheduler.flush();
+  check("a no-op click is reported as unconfirmed", adReel.getAttribute("data-abp-reel-skip"), "transition-not-confirmed");
+  h.scheduler.tickInterval(0);
+  h.scheduler.flush();
+  check("the same ignored control is not clicked again", ignored.__clicks, 1);
+  const replacement = nextButton(h, "Next Card", true);
+  replacement.click = function () { replacement.__clicks++; h.window.location.pathname = "/reel/2"; };
+  h.scheduler.tickInterval(0);
+  h.scheduler.flush();
+  check("a replacement control gets one recovery attempt", replacement.__clicks, 1);
+  check("route movement confirms the transition", adReel.getAttribute("data-abp-reel-skip"), "transition-confirmed");
+  h.scheduler.tickInterval(0);
+  h.scheduler.flush();
+  check("a confirmed transition never advances twice", replacement.__clicks, 1);
 });
 
 console.log(`\n${"=".repeat(64)}`);

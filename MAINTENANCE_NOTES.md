@@ -1,6 +1,15 @@
-# Ad Blocker Pro Ultimate — v5.1.2 Filter Pipeline Maintenance
+# Ad Blocker Pro Ultimate — v5.4.5 Maintenance
 
-This build is the second maintenance pass over v5.1.x. It studies engineering ideas from the public `217heidai/adblockfilters` project, then reimplements only the ideas that fit a Chromium Manifest V3 extension. No upstream project code is vendored into this extension.
+This build maintains the existing source-aware filter pipeline and Facebook detection lifecycle. The original pipeline studied engineering ideas from the public `217heidai/adblockfilters` project and reimplemented the ideas that fit Chromium Manifest V3. No upstream project code is vendored into this extension.
+
+## Facebook lifecycle changes
+
+- Central hiding guards honor the global switch, Facebook options, and live whitelist changes, including direct shadow events and known markers. Existing effects are released before re-evaluating changed settings.
+- Diagnostic mode only outlines detections, preserves original outlines, and does not mute, hide, navigate, or count blocked content.
+- Reel navigation confirms route, creative, or active-slide movement. A no-op is recorded explicitly; only one replacement control can receive a second attempt. Generic keys and scroll fallbacks remain disabled.
+- The MAIN-world probe is dynamically registered with whitelist exclusions and global/Facebook settings. Disabling it tears down owned hooks and observers in the open document. Registration changes take effect on future documents; enabling it again requires refreshing open tabs.
+- Generic cosmetic CSS skips Facebook/Messenger only; other platform behavior is preserved.
+- Filter bodies have an 8 MiB per-source stream cap. Oversized declared and chunked bodies fail before parsing/installing, preserving prior rules through existing refresh-failure handling.
 
 ## What was adopted conceptually
 
@@ -11,11 +20,11 @@ This build is the second maintenance pass over v5.1.x. It studies engineering id
 - **Change fingerprints.** The final compiled DNR output is fingerprinted. If the installed managed-rule count and fingerprint are unchanged, Chrome is not asked to replace thousands of identical rules.
 - **Per-source provenance.** Reports now retain source role, bytes, parsed rules, unsupported lines, raw duplicates, semantic duplicates, compacted rules, selectors, and installed-rule counts.
 
-## MV3-specific improvements made in v5.1.2
+## Existing MV3 pipeline controls
 
 - EasyList remains available at runtime for generic cosmetic selectors, but its network rules are no longer duplicated dynamically because they are already bundled as static DNR.
 - EasyPrivacy is no longer duplicated into the runtime dynamic quota. It is controlled consistently by **Strict Tracking** together with the extension's extra tracking ruleset.
-- The default manifest state now matches `strictTracking: false`; EasyPrivacy is disabled until Strict Tracking is enabled.
+- The default manifest state matches `strictTracking: true`; EasyPrivacy and the extra tracking ruleset are enabled by default and controlled by Strict Tracking.
 - Runtime filter rules own IDs `100000..128999`. Refresh/clear operations touch only this range and therefore preserve unrelated dynamic rules.
 - Dynamic replacement remains atomic. A network-source download failure or rejected DNR update keeps the previous known-good ruleset.
 - Failed cosmetic refreshes keep the previous cosmetic selector set rather than installing a partial set.
@@ -35,15 +44,7 @@ The runtime ABP/AdGuard converter intentionally supports a conservative subset. 
 
 ## Automated verification
 
-Current automated suite: **254/254 passing**.
-
-- Facebook detection: 104
-- YouTube sanitizer: 34
-- Instagram module: 23
-- Twitter/X module: 28
-- Filter engine regression: 27
-- Settings/whitelist wiring: 16
-- Filter pipeline integration: 22
+Run `npm test` for current per-suite results. The suite includes Facebook detection/orchestration, other platform modules, filter compilation/pipeline, settings, background migration/menu, popup handling, and the maintenance integration checks. No hardcoded total is maintained here.
 
 The pipeline integration tests use mocked Chrome DNR/storage and mocked filter downloads to verify ownership, failure safety, provenance, deduplication, domain compaction, static/dynamic overlap avoidance, and unchanged-build skipping.
 
@@ -51,5 +52,5 @@ The pipeline integration tests use mocked Chrome DNR/storage and mocked filter d
 
 - Run browser-level integration tests in actual Chromium for DNR precedence, extension update/reload behavior, filter refreshes, Strict Tracking transitions, and whitelist changes.
 - Exercise a representative live-site matrix to measure false positives and cosmetic breakage.
-- Add domain-scoped cosmetic-filter support only with a design that preserves source semantics and keeps CSS injection bounded.
+- Verify existing domain-scoped cosmetic rules and exceptions against representative pages while keeping injection bounded.
 - Consider moving upstream list compilation to a controlled release/build pipeline if the project later needs heavier validation such as DNS liveness checks.

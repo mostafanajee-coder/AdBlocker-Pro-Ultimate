@@ -264,7 +264,7 @@
         // cleanly to the current document after a reload. Other per-site
         // modules react live through chrome.storage.onChanged.
         if (resp && resp.success && currentTabId &&
-            (settingKey === "adBlock" || settingKey === "antiAdblock")) {
+            (settingKey === "adBlock" || settingKey === "antiAdblock" || settingKey === "fbSponsored")) {
           chrome.tabs.reload(currentTabId);
         }
       });

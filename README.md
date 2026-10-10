@@ -1,27 +1,36 @@
-# 🛡️ Ad Blocker Pro Ultimate (v5.1.2)
+# 🛡️ Ad Blocker Pro Ultimate (v5.4.5)
 
 [![Manifest V3](https://img.shields.io/badge/Chrome-Manifest%20V3-blue.svg)](https://developer.chrome.com/docs/extensions/mv3/intro/)
-[![Tests](https://img.shields.io/badge/Tests-254%2F254%20Passing-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/Tests-local%20regressions-brightgreen.svg)](tests/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Speed](https://img.shields.io/badge/Performance-Zero--Overhead-orange.svg)](#)
 
-A high-performance, lightweight Manifest V3 ad blocker engineered for modern Chromium browsers. Designed with surgical precision, featuring native declarative network filtering, intelligent Facebook & Instagram sponsored-post detection, YouTube Zero-Latency instant playback with kickstart auto-play, Twitter / X promoted tweet annihilation, in-player popunder disarming, and undetectable anti-adblock evasion.
+A Manifest V3 ad blocker for Chromium browsers, with declarative network filtering, dedicated sponsored-content detectors, YouTube response sanitizing, optional anti-adblock hooks, and popunder suppression. Local regression checks verify the behaviors described below; they do not guarantee compatibility with every live site update.
 
 ---
 
-## 🔧 v5.1.2 Filter Pipeline Maintenance
+## 🔧 v5.4.5 Maintenance
+
+Facebook settings now guard direct Shadow DOM signals and release existing hide/cover effects when protection is disabled or the site is whitelisted. The MAIN-world probe is dynamically registered with the same exclusions; live opt-out restores its owned page hooks and disconnects its observers. Enabling the probe again requires a page reload. The popup reloads the active tab after changing the Facebook/global toggle or its current-site whitelist.
+
+Reel advancement is confirmed from route, creative, or active-slide movement after clicking the explicit Next Card control. An ignored click is recorded as unconfirmed. At most one replacement control can receive a recovery attempt; the same ignored control is never clicked repeatedly. Confirmed ads stay covered and muted during transition, without collapsing the active slide or sending generic navigation keys.
+
+Generic cosmetic styles are excluded from Facebook and Messenger so they do not compete with the dedicated detector. Other platforms keep their existing cosmetic behavior. Facebook diagnostic mode outlines detections without hiding, changing media, or increasing blocked counters.
+
+Remote filter responses are read through an 8 MiB per-source byte cap, including chunked responses or misleading Content-Length headers. Size-limit failures use the existing known-good-rules fallback.
+
+After loading or updating this unpacked build, reload the extension in `chrome://extensions` and refresh open Facebook/Messenger tabs. Live visual checks are still required for delayed disclosure, recycled Reels, ignored navigation controls, and whitelist transitions.
 
 This maintenance build focuses on filter-source quality and Manifest V3 quota efficiency. Runtime lists now pass through a source-aware pipeline with conservative ABP/AdGuard-to-DNR conversion, raw and semantic deduplication, redundant subdomain compaction, provenance statistics, owned dynamic-rule IDs, atomic replacement, and compiled-output fingerprints. Bundled EasyList/EasyPrivacy network coverage is no longer downloaded again into the limited dynamic quota. Strict Tracking now owns EasyPrivacy consistently, and only redirect resources actually referenced by shipped rulesets are exposed as web-accessible resources.
 
 ## ⚡ Key Highlights & Architecture
 
-| Feature | Legacy MV2 Blockers | Ad Blocker Pro Ultimate (v5.1.2) |
+| Feature | Legacy MV2 Blockers | Ad Blocker Pro Ultimate (v5.4.5) |
 | :--- | :--- | :--- |
 | **Manifest Compatibility** | Deprecated / Disabled in Chrome 120+ | **Native Manifest V3 Compliance** |
 | **Network Filtering** | Heavy webRequest memory overhead | **~18,500 static DNR rules covering 100,000+ ad, tracker and malware domains, tracking protection on by default, + up to 29,000 managed dynamic rules** |
 | **Element Hiding** | Generic rules only, empty ad boxes left behind | **Site-specific hiding for 20,000+ sites (EasyList, AdGuard Base, Liste AR), with each site's exceptions honoured** |
 | **Manual Blocking** | Element pickers that can hide a whole page | **Right-click "Block this element" opens a preview: the highlight follows the mouse so a small part inside a bigger block can be picked, a click pins it, Bigger/Smaller (↑/↓) adjust the selection, nothing changes until Block is pressed; oversized or imprecise selections cannot be confirmed; per-site undo in the popup; the picker never runs on Facebook, Messenger, Instagram, YouTube or X (the entry only says it is not available there)** |
-| **Anti-Adblock Defusal** | Easily detected via missing global objects | **37 Web Accessible Resource Stubs (`noop.js`, `1x1.gif`)** |
+| **Anti-Adblock Defusal** | Detection based on missing global objects | **36 explicitly exposed redirect resources (`noop.js`, `1x1.gif`)** |
 | **YouTube Ads** | Blocked with black screens or video freezes | **In-Stream JSON Stripper + Instant Auto-Play Kickstart** |
 | **Facebook & Reels** | Broken by DOM obfuscation & black screens | **Visual Coordinate Reconstruction + Recycled-Node Guard** |
 | **Instagram Ads** | Sponsored posts clutter feed | **Surgical Multi-lingual Sponsored Label Detection & Stories Auto-Skip** |
@@ -75,7 +84,8 @@ Surgically eliminates promoted content across `x.com` and `twitter.com` with zer
 Facebook delivers ads directly from its own origin (`facebook.com`) and continuously obfuscates DOM text with zero-width characters (`U+034F`), scrambled DOM hierarchies, and invisible clipped elements (`overflow: hidden`).
 * **Visual Range Reconstruction**: Measures exact screen coordinates via `Range.getBoundingClientRect()` rather than reading polluted DOM text.
 * **Bilingual Support (LTR & RTL)**: Fully handles right-to-left languages (Arabic: "مُموَّل", "إعلان", "برعاية") and left-to-right (English: "Sponsored", "Ad").
-* **Reels Shelf Suppression**: Cleanly removes sponsored cards from Reels and feeds without page stutter.
+* **Feed and Reels Handling**: Collapses confirmed feed ads; covers and mutes sponsored viewer Reels while confirming explicit Next Card navigation. The separate Hide all Reels setting suppresses the feed shelf.
+* **User Controls**: Direct shadow signals honor global/Facebook switches and the whitelist; diagnostic mode only outlines cards.
 
 ### 6. 📸 Instagram Sponsored Content & Stories Blocker (`instagram.js`)
 Detects and neutralizes sponsored posts, stories, and reels across Instagram:
@@ -110,22 +120,31 @@ Movie and anime streaming platforms deploy transparent overlays (`div[style*="z-
 ├── twitter.js                 # Twitter / X promoted tweet & trend slayer
 ├── facebook.js                # Facebook feed observer and DOM scraper
 ├── fb-detect.js               # Facebook visual coordinate detection engine
+├── fb-net-probe.js            # Whitelist-aware MAIN-world shadow/XHR signals
 ├── instagram.js               # Instagram sponsored post detector
 ├── popclose.js                # Popunder auto-terminator
-├── inject.js                  # MAIN-world YouTube JSON stripper & anti-adblock evasion
+├── inject.js                  # Optional MAIN-world anti-adblock and popup hooks
+├── youtube-main.js            # MAIN-world YouTube response integration
+├── youtube-sanitizer.js       # YouTube response sanitizing
 ├── filters.js                 # Source-aware runtime filter pipeline & DNR compiler
 ├── popup.html / popup.js      # Modern Glassmorphic UI & settings controller
 ├── rulesets/
 │   └── main/                  # Core 6 DNR pre-compiled JSON rulesets
-├── web_accessible_resources/  # 37 stub & noop redirect assets
-└── tests/                     # 254-test automated unit/integration framework
-    ├── fb-detect.test.js      # Facebook coordinate detection suite (104 tests)
-    ├── youtube-sanitizer.test.js # YouTube JSON response stripping suite (34 tests)
-    ├── instagram.test.js      # Instagram sponsored detection suite (23 tests)
-    ├── twitter.test.js        # Twitter / X exact-match ad detection suite (28 tests)
-    ├── filter-engine.test.js  # Filter conversion regression suite (27 tests)
-    ├── settings-wiring.test.js # Toggle / whitelist wiring suite (16 tests)
-    └── filter-pipeline.test.js # Source pipeline integration suite (22 tests)
+├── web_accessible_resources/  # Stub & noop redirect assets (36 exposed)
+└── tests/                     # Local unit/integration regression suites
+    ├── fb-detect.test.js      # Text/geometry detection
+    ├── facebook-orchestration.test.js # Settings, Reels lifecycle and navigation
+    ├── maintenance.test.js    # Probe opt-out, cosmetic exclusions, bounded downloads
+    ├── youtube-sanitizer.test.js
+    ├── instagram.test.js
+    ├── twitter.test.js
+    ├── filter-engine.test.js
+    ├── settings-wiring.test.js
+    ├── background-migration.test.js
+    ├── background-block-menu.test.js
+    ├── filter-pipeline.test.js
+    ├── popclose.test.js
+    └── inject.test.js
 ```
 
 ---
@@ -146,33 +165,13 @@ Movie and anime streaming platforms deploy transparent overlays (`div[style*="z-
 
 ## 🧪 Automated Testing
 
-Ad Blocker Pro Ultimate includes a 254-test automated unit/integration testing suite simulating complex DOM layouts, clipped decoys, multi-level nested SVG references, and bidirectional font rendering:
+Run the local regression suites, which simulate DOM geometry, Chrome APIs, and remote responses:
 
 ```bash
 npm test
 ```
 
-### Test Coverage Summary:
-* ✅ **Facebook Detection (104 tests)**: Multi-level nested SVG chains (`Ad`, `Sponsored`, `مُموَّل`), visual coordinate bounding boxes, zero-width joiner obfuscation, decoy clipping.
-* ✅ **YouTube Sanitizer (34 tests)**: `adPlacements` and `playerAds` stripping, feed & Shorts ad removal, XSSI prefix preservation, circular reference protection.
-* ✅ **Instagram Module (23 tests)**: Multi-lingual sponsored tokens, zero-width joiner extraction, non-ad label rejection.
-* ✅ **Twitter / X Module (28 tests)**: Exact official tokens (`الإعلان`, `مُروّج`, `Promoted`, `Ad`), `twclid` attribution links, tweet body isolation, zero false positives.
-* ✅ **Filter Engine (27 tests)**: Negated resource types (`~image`), exception priority, and unsupported-option guards.
-* ✅ **Settings Wiring (16 tests)**: Dynamic MAIN-world registration, DNR whitelist, toggle wiring, and popunder/whitelist behavior.
-* ✅ **Filter Pipeline (22 tests)**: Source roles, dynamic-ID ownership, safe refresh failure behavior, semantic dedupe, hierarchy compaction, provenance, and unchanged-build skipping.
-
-```text
-================================================================
-  Facebook Detection:  104 passed, 0 failed
-  YouTube Sanitizer:     34 passed, 0 failed
-  Instagram Module:      23 passed, 0 failed
-  Twitter / X Module:    28 passed, 0 failed
-  Filter Engine:         27 passed, 0 failed
-  Settings Wiring:       16 passed, 0 failed
-  Filter Pipeline:       22 passed, 0 failed
-================================================================
-  Total:                254 passed, 0 failed (100% Success)
-```
+The command prints current per-suite assertion counts. Coverage includes Facebook detection and Reels lifecycle, other platform detectors, background migration/menu behavior, settings registration, filter compilation and failure recovery, popup suppression, probe teardown, cosmetic exclusions, and streamed download limits. These checks do not replace live Chrome/Facebook visual acceptance.
 
 ---
 

@@ -145,6 +145,19 @@ async function syncRegisteredScripts(settings) {
   const excludeMatches = buildExcludeMatches(wl);
 
   await replaceRegisteredScript(
+    "facebook-net-probe",
+    settings.adBlock !== false && settings.fbSponsored !== false,
+    {
+      matches: ["*://*.facebook.com/*", "*://*.messenger.com/*"],
+      excludeMatches,
+      js: ["fb-net-probe.js"],
+      runAt: "document_start",
+      world: "MAIN",
+      allFrames: false
+    }
+  );
+
+  await replaceRegisteredScript(
     "anti-adblock-script",
     settings.antiAdblock === true,
     {
@@ -432,7 +445,7 @@ async function applySettingsPatch(patch) {
   await chrome.storage.local.set(patch);
   const settings = mergedSettings(await readSettings());
 
-  const runtimeKeys = ["adBlock", "strictTracking", "antiAdblock", "ytSkip", "whitelist"];
+  const runtimeKeys = ["adBlock", "strictTracking", "antiAdblock", "ytSkip", "fbSponsored", "whitelist"];
   if (runtimeKeys.some((key) => Object.prototype.hasOwnProperty.call(patch, key))) {
     await syncRuntimeState(settings);
   }

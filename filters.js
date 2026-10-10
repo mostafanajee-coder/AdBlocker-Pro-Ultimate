@@ -29,6 +29,7 @@ const FILTERS = {
   NETWORK_FP_KEY: "filterNetworkFingerprint",
   COSMETIC_FP_KEY: "filterCosmeticFingerprint",
   FETCH_TIMEOUT_MS: 20000,
+  MAX_FILTER_DOWNLOAD_BYTES: 8 * 1024 * 1024,
 
   // Site-specific element hiding ("example.com##.ad", "example.com#@#.ad").
   // Stored one key per domain so a page reads only its own entries; see
@@ -532,7 +533,38 @@ const FILTERS = {
         signal: controller ? controller.signal : undefined
       });
       if (!res.ok) throw new Error("HTTP " + res.status);
-      const text = await res.text();
+      const declaredSize = Number(res.headers && res.headers.get("content-length"));
+      if (declaredSize > FILTERS.MAX_FILTER_DOWNLOAD_BYTES) {
+        if (controller) controller.abort();
+        throw new Error("filter list exceeds download size limit");
+      }
+      if (!res.body || typeof res.body.getReader !== "function") {
+        if (controller) controller.abort();
+        throw new Error("bounded filter download requires a readable stream");
+      }
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      const parts = [];
+      let bytes = 0;
+      try {
+        while (true) {
+          const chunk = await reader.read();
+          if (chunk.done) break;
+          bytes += chunk.value.byteLength;
+          if (bytes > FILTERS.MAX_FILTER_DOWNLOAD_BYTES) {
+            if (controller) controller.abort();
+            throw new Error("filter list exceeds download size limit");
+          }
+          parts.push(decoder.decode(chunk.value, { stream: true }));
+        }
+        parts.push(decoder.decode());
+      } catch (err) {
+        try { await reader.cancel(); } catch (_) {}
+        throw err;
+      } finally {
+        reader.releaseLock();
+      }
+      const text = parts.join("");
       FILTERS.validateListText(text);
       return text;
     } catch (err) {

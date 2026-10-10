@@ -57,6 +57,8 @@
   }
 
   var blocked = 0;
+  var siteWhitelisted = false;
+  var started = false;
   var seen = new WeakSet();      // global fast-path cache; card-local scans bypass it
   var dirtyCards = [];
   var dirtyCardSet = new WeakSet();
@@ -71,7 +73,7 @@
   var SPECIAL_BATCH = 64;        // bounded rotating work for global ARIA/SVG discovery
   var retryQueue = [];           // nodes whose card could not be resolved yet (mid mount/fade-in)
   var retryQueuedSet = new WeakSet();
-  var RETRY_MAX_ATTEMPTS = 5;    // ~500ms of coverage at RETRY_DELAY below
+  var RETRY_MAX_ATTEMPTS = 12;   // ~1.2s of coverage while Facebook mounts/fades a card
   var RETRY_DELAY = 100;         // ms between insertion-retry passes
   var retryTimer = null;
   /* ------------------------------------------------------------------ *
@@ -383,6 +385,18 @@
     try {
       var vids = el.querySelectorAll("video");
       for (var v = 0; v < vids.length; v++) {
+        var previousVisualStyle = vids[v].__abpPrevVisualStyle;
+        if (previousVisualStyle) {
+          ["visibility", "opacity"].forEach(function (name) {
+            var previous = previousVisualStyle[name];
+            if (previous && previous.value) {
+              vids[v].style.setProperty(name, previous.value, previous.priority || "");
+            } else {
+              vids[v].style.removeProperty(name);
+            }
+          });
+          delete vids[v].__abpPrevVisualStyle;
+        }
         if (vids[v].__abpPrevMuted !== undefined) {
           vids[v].muted = vids[v].__abpPrevMuted;
           delete vids[v].__abpPrevMuted;
@@ -409,6 +423,7 @@
     el.__abpHidden = false;
     el.removeAttribute("data-abp-blocked");
     el.removeAttribute("data-abp-size");
+    el.removeAttribute("data-abp-reel-cover");
     clearReelHideStyles(el);
     restoreReelVideoState(el, resume);
     clearMarkers(el);
@@ -422,53 +437,31 @@
   /**
    * Facebook virtualizes the Reels carousel and RECYCLES slide nodes. A node we
    * hid as an ad can be handed back holding an ORGANIC reel — and since every
-   * sweep skips nodes flagged __abpHidden, nothing would ever look at it again.
+   * sweep skips nodes flagged __abpHidden or __abpReelHidden, nothing would
+   * ever look at it again.
    *
-   * This MUST run before the __abpHidden guard in the sweep loop. Placing it
+   * This MUST run before the hidden-node guard in the sweep loop. Placing it
    * inside hide() makes it unreachable, because hide() is never called for a
    * node that is already hidden.
    */
   function revalidateReel(el) {
-    if (!el || !el.__abpHidden || !el.__abpReelId) return;
+    if (!el || (!el.__abpHidden && !el.__abpReelHidden) || !el.__abpReelId) return;
 
+    // The viewer URL changes before Facebook necessarily recycles the player
+    // node. Requiring a new card/media fingerprint avoids revealing the old ad
+    // during that transition just because the path has advanced.
     var id = getReelId(el);
     if (!id || id === el.__abpReelId) return;   // same creative — still an ad
 
-    unhide(el, false);
-    el.__abpReelId = id;
+    if (el.__abpReelHidden) unhideReelInViewer(el, true);
+    else unhide(el, true);
   }
 
-  function findReelScroller(el) {
-    var p = el;
-    while (p && p !== document.body) {
-      if (p.scrollHeight > p.clientHeight && (window.getComputedStyle(p).overflowY === "auto" || window.getComputedStyle(p).overflowY === "scroll")) {
-        return p;
-      }
-      p = p.parentElement;
-    }
-    return document.querySelector('div[role="main"] [scrollable="true"]') || null;
-  }
-
-  // The viewer's own "next reel" control. Exact labels only (a label merely
-  // containing "Next" can be an unrelated control), visible ones only, and a
-  // specific label ("Next card") wins over a bare "Next".
-  var NEXT_REEL_LABEL = /^(next|next card|next reel|next video|التالي|البطاقة التالية|الريل التالي|الفيديو التالي)$/i;
-  var BARE_NEXT_LABEL = /^(next|التالي)$/i;
-
-  function findNextReelButton() {
-    var found = null;
-    var els = document.querySelectorAll("[aria-label]");
-    for (var i = 0; i < els.length; i++) {
-      var label = (els[i].getAttribute("aria-label") || "").trim();
-      if (!NEXT_REEL_LABEL.test(label)) continue;
-      var r = els[i].getBoundingClientRect();
-      if (!(r.width > 0 && r.height > 0)) continue;
-      if (!found || (BARE_NEXT_LABEL.test(found.label) && !BARE_NEXT_LABEL.test(label))) {
-        found = { el: els[i], label: label };
-      }
-    }
-    return found;
-  }
+  // The viewer's own controls (Next/Previous Card, navigation, side panels)
+  // sit outside any single reel; a box containing them is the viewer. The
+  // generic "Next" label is deliberately excluded from the advance action:
+  // it can belong to unrelated dialogs or carousels.
+  var NEXT_REEL_LABEL = /^(next card|next reel|next video|البطاقة التالية|الريل التالي|الفيديو التالي)$/i;
 
   function isActiveSlide(el) {
     try {
@@ -480,45 +473,75 @@
     }
   }
 
-  // Tries to move the viewer to the next reel. Returns how it tried, for the
-  // data-abp-reel-skip diagnostic.
-  function advanceReelIfActive(el) {
-    if (!isActiveSlide(el)) return "not-active";
-    var vh = window.innerHeight || 900;
-
+  function findNextReelButton(excluded) {
     try {
-      var next = findNextReelButton();
-      if (next && next.el.click) {
-        next.el.click();
-        return "button:" + next.label;
+      var els = document.querySelectorAll("[aria-label]");
+      for (var i = 0; i < els.length; i++) {
+        var label = (els[i].getAttribute("aria-label") || "").trim();
+        if (!NEXT_REEL_LABEL.test(label) || !els[i].click) continue;
+        if (els[i] === excluded || !isVisibleShadowSignalHost(els[i])) continue;
+        var r = els[i].getBoundingClientRect();
+        if (r.width > 0 && r.height > 0) return { el: els[i], label: label };
       }
     } catch (_) {}
-
-    var how = "none";
-    try {
-      var target = document.activeElement && document.activeElement !== document.body ? document.activeElement : document;
-      var init = { key: "ArrowDown", code: "ArrowDown", keyCode: 40, which: 40, bubbles: true, cancelable: true };
-      target.dispatchEvent(new KeyboardEvent("keydown", init));
-      target.dispatchEvent(new KeyboardEvent("keyup", init));
-      how = "key";
-    } catch (_) {}
-
-    setTimeout(function () {
-      try {
-        if (!isActiveSlide(el)) return;
-        var scroller = findReelScroller(el);
-        if (scroller && scroller.scrollBy) {
-          scroller.scrollBy({ top: scroller.clientHeight || vh, behavior: "instant" });
-        } else {
-          window.scrollBy({ top: vh, behavior: "instant" });
-        }
-      } catch (_) {}
-    }, 60);
-    return how === "key" ? "key+scroll" : "scroll";
+    return null;
   }
 
-  // The viewer's own controls (Next/Previous Card, navigation, side panels)
-  // sit outside any single reel; a box containing them is the viewer.
+  // The confirmed ad is covered and muted before clicking Next Card. Do not
+  // pause its active video first: Facebook exposes a persistent player layer,
+  // and pausing it paints a black frame until the card transition completes.
+  // Only the explicit Reels navigation control is used; no synthetic key or
+  // generic "Next" action can move an organic reel.
+  function advanceCoveredReelIfActive(el) {
+    if (!S.adBlock || !S.fbSponsored || siteWhitelisted || S.fbDebug ||
+        !onReelViewer() || !el || !el.__abpReelHidden || !isActiveSlide(el)) return false;
+    var id = el.__abpReelId || getReelId(el) || (window.location && window.location.pathname) || "?";
+    var previous = el.__abpReelAdvance;
+    if (previous && previous.id === id && (previous.pending || previous.status === "advanced" || previous.attempts >= 2)) return false;
+
+    // An ignored click is not success. Only a replacement control may receive
+    // one further attempt; never repeatedly click the same no-op button.
+    var next = findNextReelButton(previous && previous.id === id ? previous.button : null);
+    if (!next) return false;
+
+    var state = {
+      id: id, path: window.location.pathname, button: next.el,
+      attempts: previous && previous.id === id ? previous.attempts + 1 : 1,
+      pending: true, status: "waiting"
+    };
+    el.__abpReelAdvance = state;
+    el.__abpReelSkipAttempted = id;
+    try {
+      el.setAttribute("data-abp-reel-skip", "waiting-for-transition:" + next.label);
+      next.el.click();
+      function verify(checks) {
+        if (el.__abpReelAdvance !== state || !el.__abpReelHidden || !S.adBlock ||
+            !S.fbSponsored || siteWhitelisted || S.fbDebug || !onReelViewer()) return;
+        if (!document.contains(el) || !isActiveSlide(el) || window.location.pathname !== state.path ||
+            (getReelId(el) && getReelId(el) !== state.id)) {
+          state.pending = false;
+          state.status = "advanced";
+          el.setAttribute("data-abp-reel-skip", "transition-confirmed");
+        } else if (checks < 3) {
+          setTimeout(function () { verify(checks + 1); }, 400);
+        } else {
+          state.pending = false;
+          state.status = "failed";
+          el.setAttribute("data-abp-reel-skip", "transition-not-confirmed");
+          advanceCoveredReelIfActive(el);
+        }
+      }
+      setTimeout(function () { verify(1); }, 400);
+      return true;
+    } catch (_) {
+      state.pending = false;
+      state.status = "failed";
+      delete el.__abpReelSkipAttempted;
+      el.setAttribute("data-abp-reel-skip", "transition-not-confirmed");
+      return false;
+    }
+  }
+
   var PREV_REEL_LABEL = /^(previous|previous card|previous reel|previous video|السابق|البطاقة السابقة|الريل السابق|الفيديو السابق)$/i;
 
   function containsViewerControls(el) {
@@ -544,6 +567,9 @@
       if (n > 1) break;
       if (n === 1) {
         if (containsViewerControls(cur)) break;
+        // A single Reel may span the viewport. The real boundary is the
+        // ancestor that contains multiple videos (the scroll list), or the
+        // viewer's Next/Previous controls, not a width heuristic.
         slide = cur;
       }
     }
@@ -555,54 +581,13 @@
   }
 
   /**
-   * On the full-screen Reels viewer (/reel/...) an ad is never hidden. The
-   * active video appears to be drawn by a persistent player layer that
-   * outlives the slide node we resolve as the ad's container: collapsing
-   * that node (and pausing its video) left the player showing a black frame
-   * with the like/comment/share buttons still on top, and the slide's own
-   * box then measures as zero-sized, so no size check can tell it failed.
-   *
-   * Instead the ad is muted and skipped to the next reel. Success is judged
-   * by what the user actually sees change — the viewer's URL moves to the
-   * next reel, or the slide leaves the centre of the screen. If neither
-   * happens the skip did not take, and the ad is simply left playing with
-   * its sound back: visible is always better than black. Each creative is
-   * tried once; a recycled node showing a different reel gets its own try.
+   * The full-screen viewer keeps a player layer alive outside the virtualized
+   * slide node. Cover and mute the exact reel, then use Facebook's explicit
+   * Next Card control. Pause the video only after its slide is off-screen so
+   * the persistent player does not flash a black frame during the transition.
    */
-  // Readable from the DevTools console (unlike expandos set in this isolated
-  // world): the reel's own attribute, plus the most recent one on <html>.
-  function noteReelSkip(el, state) {
-    try {
-      el.setAttribute("data-abp-reel-skip", state);
-      document.documentElement.setAttribute("data-abp-reel-skip-last", state);
-    } catch (_) {}
-  }
-
-  // While a reel ad is being skipped its content is made transparent, never
-  // display:none (collapsing the slide is what left the viewer stuck black).
-  // The cover is always removed again once the skip attempt is over.
-  function coverReel(el) {
-    el.style.setProperty("opacity", "0", "important");
-    el.setAttribute("data-abp-reel-cover", "1");
-    try {
-      var vids = el.querySelectorAll("video");
-      for (var v = 0; v < vids.length; v++) {
-        if (vids[v].__abpPrevMuted === undefined) vids[v].__abpPrevMuted = vids[v].muted;
-        vids[v].muted = true;
-      }
-    } catch (_) {}
-  }
-
-  function uncoverReel(el) {
-    if (el.getAttribute("data-abp-reel-cover") === null) return;
-    el.style.removeProperty("opacity");
-    el.removeAttribute("data-abp-reel-cover");
-    restoreReelVideoState(el, false);
-  }
-
-  function uncoverAllReels() {
-    var covered = document.querySelectorAll("[data-abp-reel-cover]");
-    for (var i = 0; i < covered.length; i++) uncoverReel(covered[i]);
+  function wholeReelOf(video, fallback) {
+    return reelSlideOf(video) || fallback;
   }
 
   function reelIntersectsViewport(el) {
@@ -615,122 +600,121 @@
     }
   }
 
-  // Watches reel ads recognised before they reach the screen (Facebook loads
-  // the next reel ahead of time), so they are covered from their first
-  // visible pixel and skipped the moment they arrive — without waiting for
-  // the next sweep, which is what let the ad show for a moment first.
-  var reelAdObserver = (typeof IntersectionObserver !== "undefined") ? new IntersectionObserver(function (entries) {
-    for (var i = 0; i < entries.length; i++) {
-      var el = entries[i].target;
-      var st = el.__abpReelAd;
-      if (!st || st.failed || (getReelId(el) || "?") !== st.id) {
-        // Recycled into a different reel, or given up on: leave it alone.
-        uncoverReel(el);
-        try { reelAdObserver.unobserve(el); } catch (_) {}
-        continue;
-      }
-      if (!entries[i].isIntersecting) {
-        if (!st.busy) uncoverReel(el);
-        continue;
-      }
-      coverReel(el);
-      if (entries[i].intersectionRatio >= 0.5 || isActiveSlide(el)) skipReelAd(el);
-    }
-  }, { threshold: [0, 0.5] }) : null;
-
-  var REEL_SKIP_ATTEMPTS = 2;
-  var REEL_SKIP_CHECK_MS = 700;
-  var REEL_COVER_POLL_MS = 150;
-  var REEL_COVER_MAX_MS = 3000;
-
-  // The box a detector resolves can be just the video's own frame, with the
-  // reel's text, "Learn more" and like/comment/share column outside it —
-  // which is why hiding it once left those floating over a black frame.
-  // Widen to the whole reel (see reelSlideOf for where it stops).
-  function wholeReelOf(video, fallback) {
-    return reelSlideOf(video) || fallback;
+  function pauseReelVideos(el) {
+    try {
+      var vids = el.querySelectorAll("video");
+      for (var v = 0; v < vids.length; v++) { try { vids[v].pause(); } catch (_) {} }
+    } catch (_) {}
   }
 
-  // Facebook animates the move to the next reel over up to about a second,
-  // so a skipped ad is still sliding out after the skip is confirmed. Keep
-  // it covered until it has actually left the screen (bounded, so a cover
-  // can never outstay REEL_COVER_MAX_MS).
-  function uncoverWhenOffScreen(el, st, waited) {
-    if (st.busy) return; // a new skip attempt owns the cover now
-    if (!document.contains(el) || !reelIntersectsViewport(el) || waited >= REEL_COVER_MAX_MS) {
-      uncoverReel(el);
-      return;
-    }
-    setTimeout(function () { uncoverWhenOffScreen(el, st, waited + REEL_COVER_POLL_MS); }, REEL_COVER_POLL_MS);
+  // Hide the resolved reel's contents through the scoped stylesheet while
+  // retaining its layout box. Removing an active slide with display:none makes
+  // Facebook snap to the next card.
+  function coverReel(el) {
+    if (!el) return;
+    el.setAttribute("data-abp-reel-cover", "1");
+
+    var pauseNow = !isActiveSlide(el);
+    try {
+      var vids = el.querySelectorAll("video");
+      for (var v = 0; v < vids.length; v++) {
+        if (!vids[v].__abpPrevVisualStyle) {
+          vids[v].__abpPrevVisualStyle = {};
+          ["visibility", "opacity"].forEach(function (name) {
+            vids[v].__abpPrevVisualStyle[name] = {
+              value: vids[v].style.getPropertyValue(name),
+              priority: vids[v].style.getPropertyPriority ? vids[v].style.getPropertyPriority(name) : ""
+            };
+          });
+        }
+        // Facebook can keep the active video in a persistent player layer
+        // outside the slide. Hiding only the slide leaves that compositor
+        // surface visible (often as a black frame), so hide the media node too.
+        vids[v].style.setProperty("visibility", "hidden", "important");
+        vids[v].style.setProperty("opacity", "0", "important");
+        if (vids[v].__abpPrevMuted === undefined) vids[v].__abpPrevMuted = vids[v].muted;
+        vids[v].muted = true;
+        if (pauseNow) { try { vids[v].pause(); } catch (_) {} }
+      }
+    } catch (_) {}
   }
 
-  function skipReelAd(el) {
+  function viewerReelTargetOf(el) {
+    if (!el) return null;
     var vids;
-    try { vids = el.querySelectorAll("video"); } catch (_) { return false; }
-    // Exactly one reel. A box holding several (a generic label sweep can
-    // resolve one) would otherwise skip whichever reel is on screen, which
-    // may be an organic one sitting next to the ad.
-    if (!vids || vids.length !== 1) return false;
-    el = wholeReelOf(vids[0], el);
+    try { vids = el.querySelectorAll("video"); } catch (_) { return null; }
+    // A generic label sweep can resolve a wrapper containing several reels.
+    // Never cover or mute that wrapper: the ad signal belongs to one reel.
+    if (!vids || vids.length !== 1) return null;
+    return wholeReelOf(vids[0], el) || el;
+  }
 
-    var id = getReelId(el) || "?";
-    var st = el.__abpReelAd;
-    if (!st || st.id !== id) st = el.__abpReelAd = { id: id, failed: false, busy: false };
-    if (st.failed || st.busy) return false;
+  function uncoverReel(el, resume) {
+    if (!el) return;
+    el.removeAttribute("data-abp-reel-cover");
+    restoreReelVideoState(el, resume === true);
+  }
 
-    if (!isActiveSlide(el)) {
-      // Not the reel on screen yet: watch it, and cover it if it is already
-      // partly scrolled into view.
-      if (reelAdObserver && !st.watched) {
-        st.watched = true;
-        try { reelAdObserver.observe(el); } catch (_) {}
-      }
-      // Diagnostic: shows whether an ad was recognised before it arrived.
-      try { el.setAttribute("data-abp-reel-skip", "watching"); } catch (_) {}
-      if (reelIntersectsViewport(el)) coverReel(el);
-      return false;
+  function hideReelInViewer(el, reason) {
+    if (!el) return false;
+    el = viewerReelTargetOf(el);
+    if (!el) return false;
+    if (!el.__abpReelHidden) {
+      el.__abpReelHidden = true;
+      blocked++;
+      mark("ready", { "fb-blocked": blocked });
+      report();
     }
-
-    st.busy = true;
+    el.setAttribute("data-abp-reel-hidden", reason || "sponsored-reel");
+    var rid = getReelId(el);
+    if (rid) el.__abpReelId = rid;
+    else if (!el.__abpReelId && onReelViewer() && window.location) el.__abpReelId = window.location.pathname || "";
     coverReel(el);
-    attemptReelSkip(el, st, vids, 1);
+    advanceCoveredReelIfActive(el);
     return true;
   }
 
-  function attemptReelSkip(el, st, vids, attempt) {
-    var startPath = window.location.pathname;
-    var how = advanceReelIfActive(el);
-    noteReelSkip(el, "tried:" + how + (attempt > 1 ? ":" + attempt : ""));
+  function unhideReelInViewer(el, resume) {
+    if (!el) return;
+    var wasHidden = el.__abpReelHidden === true;
+    el.__abpReelHidden = false;
+    el.removeAttribute("data-abp-reel-hidden");
+    el.removeAttribute("data-abp-reel-skip");
+    delete el.__abpReelId;
+    delete el.__abpReelSkipAttempted;
+    delete el.__abpReelAdvance;
+    uncoverReel(el, resume);
+    if (wasHidden && blocked > 0) {
+      blocked--;
+      mark("ready", { "fb-blocked": blocked });
+      report();
+    }
+  }
 
-    setTimeout(function () {
-      try {
-        var moved = window.location.pathname !== startPath ||
-                    !document.contains(el) || !isActiveSlide(el) ||
-                    (getReelId(el) || "?") !== st.id;
-        if (!moved && attempt < REEL_SKIP_ATTEMPTS) {
-          // The first click can land while the scroll into this reel is still
-          // animating and be ignored; try once more before giving up.
-          attemptReelSkip(el, st, vids, attempt + 1);
-          return;
-        }
-        noteReelSkip(el, (moved ? "skipped:" : "not-skipped:") + how);
-        st.busy = false;
-        if (moved) {
-          // Leaving: stop it so its audio cannot leak, and keep it covered
-          // while it slides away. If the user scrolls back to it, it is
-          // covered and skipped again.
-          for (var p = 0; p < vids.length; p++) { try { vids[p].pause(); } catch (_) {} }
-          blocked++;
-          mark("ready", { "fb-blocked": blocked });
-          report();
-          uncoverWhenOffScreen(el, st, 0);
-        } else {
-          // The skip did not take: show the ad rather than a black reel.
-          st.failed = true;
-          uncoverReel(el);
-        }
-      } catch (_) {}
-    }, REEL_SKIP_CHECK_MS);
+  function uncoverAllReels(resume) {
+    var covered = document.querySelectorAll("[data-abp-reel-cover], [data-abp-reel-hidden]");
+    for (var i = 0; i < covered.length; i++) {
+      if (resume !== true) pauseReelVideos(covered[i]);
+      if (covered[i].__abpReelHidden) unhideReelInViewer(covered[i], resume === true);
+      else uncoverReel(covered[i], resume === true);
+    }
+  }
+
+  function refreshReelCovers() {
+    if (!S.adBlock || !S.fbSponsored || siteWhitelisted || S.fbDebug) return;
+    var hidden = document.querySelectorAll("[data-abp-reel-hidden]");
+    for (var i = 0; i < hidden.length; i++) {
+      revalidateReel(hidden[i]);
+      if (!hidden[i].__abpReelHidden) continue;
+      if (!document.contains(hidden[i])) {
+        unhideReelInViewer(hidden[i], false);
+        continue;
+      }
+      if (reelIntersectsViewport(hidden[i])) {
+        coverReel(hidden[i]);
+        advanceCoveredReelIfActive(hidden[i]);
+      } else pauseReelVideos(hidden[i]);
+    }
   }
 
   // Failsafe for every hide path: an ad card never legitimately contains the
@@ -769,12 +753,69 @@
     }
   }
 
+  function hidingEnabled(reason) {
+    if (!S.adBlock || siteWhitelisted) return false;
+    if (reason === "suggested") return S.fbSuggested;
+    if (reason === "reels") return S.fbReels;
+    if (reason && reason.indexOf("sidebar-") === 0) return S.fbSponsored && S.fbSidebar;
+    return S.fbSponsored;
+  }
+
+  function clearDebug(el) {
+    var saved = el.__abpDebugStyle;
+    if (!saved) return;
+    ["outline", "outline-offset"].forEach(function (name) {
+      if (saved[name].value) el.style.setProperty(name, saved[name].value, saved[name].priority);
+      else el.style.removeProperty(name);
+    });
+    delete el.__abpDebugStyle;
+    el.removeAttribute("data-abp-debug");
+  }
+
+  function releaseFacebookEffects() {
+    var nodes = document.querySelectorAll("[data-abp-blocked], [data-abp-reel-hidden], [data-abp-debug]");
+    for (var i = 0; i < nodes.length; i++) {
+      clearDebug(nodes[i]);
+      if (nodes[i].__abpReelHidden) unhideReelInViewer(nodes[i], false);
+      else if (nodes[i].hasAttribute("data-abp-blocked")) unhide(nodes[i], false);
+    }
+    var markers = document.querySelectorAll("[data-abp-ad-marker]");
+    for (var m = 0; m < markers.length; m++) markers[m].removeAttribute("data-abp-ad-marker");
+  }
+
+  function stopFacebookProbeIfDisabled() {
+    if (siteWhitelisted || !S.adBlock || !S.fbSponsored) {
+      try { document.dispatchEvent(new CustomEvent("__abpFacebookProbeStop")); } catch (_) {}
+    }
+  }
+
   function hide(el, reason) {
     if (!el) return false;
+    if (reason === "known-marker") reason = el.__abpHideReason || "sponsored";
+    if (!hidingEnabled(reason)) return false;
     if (isPageStructure(el)) return false;
+    el.__abpHideReason = reason;
+
+    // Diagnostic mode never installs the hiding attribute, changes media, or
+    // reports a blocked item. Preserve the page's original outline for cleanup.
+    if (S.fbDebug) {
+      if (!el.__abpDebugStyle) {
+        el.__abpDebugStyle = {};
+        ["outline", "outline-offset"].forEach(function (name) {
+          el.__abpDebugStyle[name] = {
+            value: el.style.getPropertyValue(name),
+            priority: el.style.getPropertyPriority ? el.style.getPropertyPriority(name) : ""
+          };
+        });
+      }
+      el.setAttribute("data-abp-debug", reason);
+      el.style.setProperty("outline", "3px solid #e53935", "important");
+      el.style.setProperty("outline-offset", "-3px", "important");
+      return true;
+    }
 
     var isSidebar = !!(reason && reason.indexOf("sidebar-") === 0);
-    if (!isSidebar && !S.fbDebug && onReelViewer()) return skipReelAd(el);
+    if (!isSidebar && !S.fbDebug && onReelViewer()) return hideReelInViewer(el, reason);
 
     var alreadyHidden = el.hasAttribute("data-abp-blocked");
 
@@ -822,15 +863,6 @@
       var pre = el.getBoundingClientRect();
       el.setAttribute("data-abp-size", Math.round(pre.width) + "x" + Math.round(pre.height));
     } catch (_) {}
-
-    if (S.fbDebug) {
-      el.style.setProperty("outline", "3px solid #e53935", "important");
-      el.style.setProperty("outline-offset", "-3px", "important");
-      el.style.setProperty("opacity", "0.45", "important");
-      blocked++;
-      mark("ready", { "fb-blocked": blocked });
-      return true;
-    }
 
     if (isReel) {
       // Reels shelf in the feed: collapse the card completely and drop
@@ -1217,6 +1249,7 @@
 
   /** Re-evaluate every detector against one card without consulting `seen`. */
   function scanCard(card) {
+    if (!S.adBlock || siteWhitelisted) return;
     if (!card) return;
 
     // A marker re-hides the card it was found in. A dirty "card" can be a
@@ -1381,16 +1414,45 @@
     var vids = document.querySelectorAll("video");
     for (var i = 0; i < vids.length; i++) {
       var card = reelCardOf(vids[i]);
-      if (!card || card.__abpHidden || !isActiveSlide(card)) continue;
+      if (!card || card.__abpHidden || card.__abpReelHidden || !isActiveSlide(card)) continue;
       // Changes elsewhere on the page (comments, counters, the next reel
-      // loading) run this constantly. A reel already found not to be an ad,
-      // whose own content has not changed since, is not re-read: the full
-      // read checks the visibility of every short label in it.
-      var sig = card.querySelectorAll("*").length + ":" + (card.textContent || "").length;
+      // loading) run this constantly. Re-read only when the exact ad-relevant
+      // text, labels, or links changed. Facebook can replace an aria-label with
+      // a same-length value without changing the DOM size or text length.
+      var sig = reelDetectionSignature(card);
       if (card.__abpReelSig === sig) continue;
       if (reelCardIsAd(card)) hide(card, "sponsored-reel");
       else card.__abpReelSig = sig;
     }
+  }
+
+  function reelDetectionSignature(card) {
+    var hash = 0x811c9dc5;
+    var size = 0;
+    function add(value) {
+      value = String(value || "");
+      size += value.length + 1;
+      for (var i = 0; i < value.length; i++) {
+        hash ^= value.charCodeAt(i);
+        hash = Math.imul(hash, 0x01000193);
+      }
+      hash ^= 0;
+      hash = Math.imul(hash, 0x01000193);
+    }
+
+    add(card.querySelectorAll("*").length);
+    add(card.textContent || "");
+    var labelled = card.querySelectorAll("[aria-label]");
+    for (var i = 0; i < labelled.length; i++) add(labelled[i].getAttribute("aria-label"));
+    var testIds = card.querySelectorAll("[data-testid]");
+    for (var t = 0; t < testIds.length; t++) add(testIds[t].getAttribute("data-testid"));
+    var links = card.querySelectorAll("a[href]");
+    for (var a = 0; a < links.length; a++) add(links[a].getAttribute("href"));
+    var uses = card.querySelectorAll("use");
+    for (var u = 0; u < uses.length; u++) {
+      add(uses[u].getAttribute("xlink:href") || uses[u].getAttribute("href"));
+    }
+    return size + ":" + (hash >>> 0).toString(36);
   }
 
   /** Dedicated Scoped Sweeper for Facebook Reels ads (Zero global reflow) */
@@ -1426,12 +1488,20 @@
       revalidateReel(card);
 
       if (card.__abpHidden) continue;
+      if (card.__abpReelHidden) {
+        if (reelIntersectsViewport(card)) {
+          coverReel(card);
+          advanceCoveredReelIfActive(card);
+        }
+        continue;
+      }
       if (reelCardIsAd(card)) hide(card, "sponsored-reel");
     }
   }
 
   function sweep(runGlobal) {
     pending = false;
+    if (!S.adBlock || siteWhitelisted) return;
 
     scanDirtyCards();
 
@@ -1526,11 +1596,15 @@
   }
 
   function start() {
+    if (started || siteWhitelisted) return;
+    started = true;
     mark("ready", { "fb-labels": SPONSORED.length });
     
     // Inject global stylesheet as a safety net against React stripping inline styles
     var style = document.createElement("style");
-    style.textContent = '[data-abp-blocked] { display: none !important; height: 0 !important; min-height: 0 !important; max-height: 0 !important; margin: 0 !important; padding: 0 !important; visibility: hidden !important; border: 0 !important; pointer-events: none !important; overflow: hidden !important; }';
+    style.textContent = '[data-abp-blocked] { display: none !important; height: 0 !important; min-height: 0 !important; max-height: 0 !important; margin: 0 !important; padding: 0 !important; visibility: hidden !important; border: 0 !important; pointer-events: none !important; overflow: hidden !important; }' +
+      '\n[data-abp-reel-cover="1"] { visibility: hidden !important; opacity: 0 !important; pointer-events: none !important; }' +
+      '\n[data-abp-reel-cover="1"] video { visibility: hidden !important; opacity: 0 !important; }';
     if (document.head) document.head.appendChild(style);
 
     // Register every card already in the DOM at boot for intersection-driven
@@ -1618,16 +1692,19 @@
       scrollScheduled = true;
       setTimeout(function () {
         scrollScheduled = false;
+        refreshReelCovers();
         schedule(false, true);
       }, 80);
     }
 
     window.addEventListener("scroll", onScrollPassive, { passive: true, capture: true });
     window.addEventListener("wheel", onScrollPassive, { passive: true, capture: true });
+    window.addEventListener("resize", refreshReelCovers, { passive: true });
 
     // Periodic bounded refresh for lazy content. The rotating cursors advance
     // through the document; this does not reset `seen` or restart at item 0.
     setInterval(function () {
+      refreshReelCovers();
       schedule(false, true);
     }, 2500);
 
@@ -1643,7 +1720,10 @@
       if (path === lastPathname) return;
       lastPathname = path;
       try { releaseStructuralHides(); } catch (_) {}
-      try { uncoverAllReels(); } catch (_) {}
+      // Moving from one Reel to another is the ad-skip itself. Keep the old
+      // ad covered through that transition; the sweep revalidates a recycled
+      // node. Only release covers once the user leaves the Reels viewer.
+      if (!onReelViewer()) { try { uncoverAllReels(false); } catch (_) {} }
       schedule(true, true);
     }
     setInterval(checkRouteChange, 400);
@@ -1684,6 +1764,18 @@
     // with no readable text and no DOM/network correlation detectable at
     // all. Hide the enclosing card immediately; no heuristic guessing.
     document.addEventListener("__abpShadowSponsoredDetected", function (e) {
+      if (!hidingEnabled("shadow-dom-ad")) return;
+      var host = e && e.target;
+      // Exact label text alone is not enough: Facebook creates off-screen and
+      // display:none template roots containing the same labels. Reject those
+      // before treating the signal as a live ad or touching its Reel.
+      if (!isVisibleShadowSignalHost(host)) {
+        try {
+          var rejected = parseInt(document.documentElement.getAttribute("data-abp-shadow-signal-rejected") || "0", 10);
+          document.documentElement.setAttribute("data-abp-shadow-signal-rejected", String(rejected + 1));
+        } catch (_) {}
+        return;
+      }
       try {
         var prev = parseInt(document.documentElement.getAttribute("data-abp-shadow-signal-received") || "0", 10);
         document.documentElement.setAttribute("data-abp-shadow-signal-received", String(prev + 1));
@@ -1699,13 +1791,35 @@
     });
   }
 
+  function isVisibleShadowSignalHost(host) {
+    if (!host || host.nodeType !== 1) return false;
+    try { if (typeof host.isConnected === "boolean" && !host.isConnected) return false; } catch (_) {}
+
+    try {
+      var rect = host.getBoundingClientRect();
+      if (!rect || !(rect.width > 0 && rect.height > 0)) return false;
+    } catch (_) { return false; }
+
+    for (var cur = host, depth = 0; cur && cur.nodeType === 1 && depth++ < 32; cur = cur.parentElement) {
+      try {
+        var style = window.getComputedStyle ? window.getComputedStyle(cur) : getComputedStyle(cur);
+        if (style && (style.display === "none" || style.visibility === "hidden" || style.visibility === "collapse" ||
+            Number(style.opacity) === 0 || style.contentVisibility === "hidden")) return false;
+      } catch (_) {}
+      if (cur === document.documentElement) break;
+    }
+    return true;
+  }
+
   function boot() {
     try {
       chrome.storage.local.get(Object.keys(S).concat(["whitelist"]), function (cfg) {
         if (cfg) for (var k in S) if (cfg[k] !== undefined) S[k] = cfg[k];
 
         var wl = (cfg && cfg.whitelist) || [];
-        if (isWhitelisted(window.location.hostname, wl)) return;
+        siteWhitelisted = isWhitelisted(window.location.hostname, wl);
+        stopFacebookProbeIfDisabled();
+        if (siteWhitelisted) return;
 
         if (document.body) start();
         else document.addEventListener("DOMContentLoaded", start);
@@ -1727,10 +1841,19 @@
       var relevant = false;
       for (var k in changes) {
         if (k in S) { S[k] = changes[k].newValue; relevant = true; }
-        else if (k === "whitelist") relevant = true;
+        else if (k === "whitelist") {
+          siteWhitelisted = isWhitelisted(window.location.hostname, changes[k].newValue || []);
+          relevant = true;
+        }
       }
       if (!relevant) return;
+      stopFacebookProbeIfDisabled();
+      releaseFacebookEffects();
       seen = new WeakSet();
+      if (!started && !siteWhitelisted) {
+        if (document.body) start();
+        else document.addEventListener("DOMContentLoaded", start);
+      }
       schedule(true, true);
     });
   } catch (_) {}
