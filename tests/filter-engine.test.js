@@ -101,7 +101,7 @@ check(ex && ex.h.has('.sidebar-ad') && ex.h.has('div[id^="ad-slot"]'), 'collects
 check(siteMap.get('news.example.org') && siteMap.get('news.example.org').h.has('div[id^="ad-slot"]'), 'a rule listing several domains is stored under each');
 check(ex && ex.u.has('.ad-banner'), 'collects "#@#" exceptions separately');
 check(ex && ![...ex.h].some(s => s.includes('{')), 'rejects a selector containing braces (CSS injection)');
-check(ex && ![...ex.h].some(s => /has-text|procedural|css-injection|\+js/.test(s)), 'skips extended, procedural, CSS-injection and scriptlet syntax');
+check(ex && ![...ex.h].some(s => /has-text|css-injection|\+js/.test(s)) && ex.h.has('.procedural:has(> .x)') && ex.s.size === 1, 'keeps native CSS and approved scriptlets separate while rejecting unsupported procedural syntax');
 check(!siteMap.has('example.net') && !siteMap.has('~example.net') && ![...siteMap.keys()].some(k => k.includes('*')), 'skips negated and wildcard domain lists instead of approximating them');
 check(!siteMap.has('facebook.com') && !siteMap.has('m.youtube.com'), 'leaves sites with dedicated modules (Facebook, YouTube, ...) to those modules');
 check(![...siteMap.keys()].some(k => !k.includes('.')), 'never stores a generic rule as a site rule');

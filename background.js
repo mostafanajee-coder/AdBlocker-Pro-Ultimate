@@ -1,4 +1,5 @@
-importScripts("filters.js");
+importScripts("advanced-rules.js", "filters.js", "core-filters.js");
+FILTERS.core = CORE_FILTERS;
 
 const DEFAULTS = {
   adBlock: true,
@@ -26,8 +27,10 @@ const DEFAULTS = {
 
   // ---- Filter lists ----
   useFilterLists: true,
-  filterLists: ["arabic", "easylist", "adguard-base"],
+  filterLists: ["arabic", "easylist", "adguard-base", "ublock-ads", "ublock-unbreak", "ublock-quick-fixes"],
   filterReport: null,
+  lastFilterRefresh: 0,
+  lastFilterFailure: null,
   cosmeticCss: [],
 
   totalBlocked: 0,
@@ -159,7 +162,7 @@ async function syncRegisteredScripts(settings) {
 
   await replaceRegisteredScript(
     "anti-adblock-script",
-    settings.antiAdblock === true,
+    settings.adBlock !== false && settings.antiAdblock === true,
     {
       matches: ["<all_urls>"],
       excludeMatches,
@@ -184,6 +187,43 @@ async function syncRegisteredScripts(settings) {
       matchOriginAsFallback: true
     }
   );
+}
+
+const scriptletTasks = new Map();
+async function syncEngineScriptlets(sender) {
+  if (!chrome.scripting || !sender.tab || !Number.isInteger(sender.tab.id) || !sender.documentId) return { applied: 0 };
+  let url, topUrl;
+  try {
+    url = new URL(sender.url);
+    topUrl = new URL(sender.tab.url || sender.url);
+  } catch (_) { return { applied: 0 }; }
+  if (!/^https?:$/.test(url.protocol) || !/^https?:$/.test(topUrl.protocol)) return { applied: 0 };
+  const host = url.hostname;
+  const keys = ["adBlock", "useFilterLists", "antiAdblock", "whitelist"].concat(ADV_RULES.keys(host));
+  const target = { tabId: sender.tab.id, documentIds: [sender.documentId] };
+  function selected(store) {
+    return store.adBlock !== false && store.useFilterLists !== false && store.antiAdblock === true &&
+      !ADV_RULES.excluded(host) && !ADV_RULES.excluded(topUrl.hostname) &&
+      !isWhitelisted(host, store.whitelist || []) && !isWhitelisted(topUrl.hostname, store.whitelist || [])
+      ? ADV_RULES.collect(store, host).scriptlets.map(rule => rule.raw) : [];
+  }
+  const key = sender.documentId;
+  const prior = scriptletTasks.get(key) || Promise.resolve();
+  const work = prior.catch(() => {}).then(async () => {
+    const initial = selected(await chrome.storage.local.get(keys));
+    if (initial.length) await chrome.scripting.executeScript({ target, world: "MAIN", files: ["advanced-rules.js", "scriptlet-engine.js"] });
+    // Re-read after file injection: opt-outs/list changes during the native
+    // call cannot apply the previously captured configuration.
+    const current = selected(await chrome.storage.local.get(keys));
+    const result = await chrome.scripting.executeScript({ target, world: "MAIN", args: [current],
+      func: function (rawRules) {
+        return globalThis.__abpScriptletEngineV1 ? globalThis.__abpScriptletEngineV1.apply(rawRules) : { applied: 0 };
+      } });
+    return { applied: result && result[0] && result[0].result ? Number(result[0].result.applied) || 0 : 0 };
+  });
+  scriptletTasks.set(key, work);
+  try { return await work; }
+  finally { if (scriptletTasks.get(key) === work) scriptletTasks.delete(key); }
 }
 
 async function syncWhitelistRules(whitelist) {
@@ -216,13 +256,20 @@ async function syncStaticRulesets(settings) {
   if (settings.strictTracking === true) enableRulesetIds.push(...STRICT_TRACKING_RULESET_IDS);
   else disableRulesetIds.push(...STRICT_TRACKING_RULESET_IDS);
 
-  await chrome.declarativeNetRequest.updateEnabledRulesets({
-    enableRulesetIds,
-    disableRulesetIds
-  });
+  if (typeof CORE_FILTERS.syncStatic === "function") {
+    const coreIds = new Set(CORE_FILTERS.SOURCES.map(source => source.id));
+    await chrome.declarativeNetRequest.updateEnabledRulesets({
+      enableRulesetIds: enableRulesetIds.filter(id => !coreIds.has(id)),
+      disableRulesetIds: disableRulesetIds.filter(id => !coreIds.has(id))
+    });
+    await CORE_FILTERS.syncStatic(settings);
+  } else {
+    await chrome.declarativeNetRequest.updateEnabledRulesets({ enableRulesetIds, disableRulesetIds });
+  }
 }
 
 async function syncRuntimeState(settings) {
+  if (typeof CORE_FILTERS.prune === "function") await CORE_FILTERS.prune(settings);
   await Promise.all([
     syncStaticRulesets(settings),
     syncWhitelistRules(settings.whitelist),
@@ -235,9 +282,38 @@ async function syncRuntimeState(settings) {
  * ---------------------------------------------------------------- */
 
 let rebuilding = false;
+let rebuildPending = false;
+const FILTER_REFRESH_MINUTES = 48 * 60;
+const FILTER_REFRESH_MS = FILTER_REFRESH_MINUTES * 60 * 1000;
+
+async function ensureFilterRefreshAlarm(reset, lastSuccess, lastFailure) {
+  const existing = await new Promise(resolve => chrome.alarms.get("filterRefresh", resolve));
+  if (reset || !existing || existing.periodInMinutes !== FILTER_REFRESH_MINUTES) {
+    const timestamp = Number(lastSuccess) || 0;
+    const when = timestamp ? Math.max(Date.now() + 1000, timestamp + FILTER_REFRESH_MS) : Date.now() + 60000;
+    chrome.alarms.create("filterRefresh", { periodInMinutes: FILTER_REFRESH_MINUTES, when });
+  }
+  // Alarms may be lost across browser restarts. Recreate a missing retry at
+  // the original failure deadline rather than postponing it with every wake.
+  if (lastFailure && Number.isFinite(lastFailure.at)) {
+    const retry = await new Promise(resolve => chrome.alarms.get("filterRefreshRetry", resolve));
+    if (!retry) chrome.alarms.create("filterRefreshRetry", {
+      when: Math.max(Date.now() + 1000, lastFailure.at + 60 * 60 * 1000)
+    });
+  }
+}
+
+async function refreshIfOverdue(settings, includeInitial) {
+  const last = Number(settings.lastFilterRefresh) || 0;
+  if (settings.lastFilterFailure && Date.now() - settings.lastFilterFailure.at < 60 * 60 * 1000) return;
+  if (settings.adBlock !== false && settings.useFilterLists !== false &&
+      ((includeInitial && !last) || (last && Date.now() - last >= FILTER_REFRESH_MS))) {
+    await rebuildFilters(false);
+  }
+}
 
 async function rebuildFilters(notify) {
-  if (rebuilding) return { ok: false, error: "already running" };
+  if (rebuilding) { rebuildPending = true; return { ok: false, error: "already running" }; }
   rebuilding = true;
   try {
     const current = mergedSettings(await readSettings());
@@ -252,11 +328,30 @@ async function rebuildFilters(notify) {
         } catch (_) {}
       }
     });
-    return { ok: report.installOk !== false, report, error: report.error || undefined };
+    const ok = report.installOk !== false && report.cosmeticRefreshOk !== false && !(report.siteCosmetics && report.siteCosmetics.error);
+    if (ok) {
+      const timestamp = Date.now();
+      await chrome.storage.local.set({ lastFilterRefresh: timestamp, lastFilterFailure: null });
+      await ensureFilterRefreshAlarm(true, timestamp);
+      if (chrome.alarms.clear) await chrome.alarms.clear("filterRefreshRetry");
+    } else {
+      const error = report.error || "cosmetic refresh incomplete; previous cosmetics retained";
+      await chrome.storage.local.set({ lastFilterFailure: { at: Date.now(), error } });
+      chrome.alarms.create("filterRefreshRetry", { delayInMinutes: 60 });
+    }
+    return { ok, report, error: report.error || undefined };
   } catch (e) {
+    try {
+      await chrome.storage.local.set({ lastFilterFailure: { at: Date.now(), error: e.message } });
+      chrome.alarms.create("filterRefreshRetry", { delayInMinutes: 60 });
+    } catch (_) {}
     return { ok: false, error: e.message };
   } finally {
     rebuilding = false;
+    if (rebuildPending) {
+      rebuildPending = false;
+      Promise.resolve().then(() => rebuildFilters(false));
+    }
   }
 }
 
@@ -271,20 +366,15 @@ async function syncDynamicFilters(settings, forceRebuild) {
   }
 }
 
-// Created only when missing. chrome.alarms.create() replaces an existing alarm
-// of the same name, and this runs on every service-worker start (a blocked
-// ad, a tab switch...), so recreating it kept pushing the first refresh an
-// hour away and the daily refresh never ran for an active user.
-try {
-  chrome.alarms.get("filterRefresh", function (existing) {
-    if (!existing) chrome.alarms.create("filterRefresh", { periodInMinutes: 24 * 60, delayInMinutes: 60 });
-  });
-} catch (_) {}
+// Preserve the scheduled time on worker restarts; migrate old 24-hour alarms.
+readSettings().then(data => ensureFilterRefreshAlarm(false, data.lastFilterRefresh, data.lastFilterFailure)).catch(() => {});
 
 chrome.alarms.onAlarm.addListener(function (alarm) {
-  if (alarm.name !== "filterRefresh") return;
+  if (alarm.name !== "filterRefresh" && alarm.name !== "filterRefreshRetry") return;
   readSettings().then(function (data) {
     const settings = mergedSettings(data);
+    if (alarm.name === "filterRefresh" && settings.lastFilterFailure &&
+        Date.now() - settings.lastFilterFailure.at < 60 * 60 * 1000) return;
     if (settings.adBlock !== false && settings.useFilterLists !== false) rebuildFilters(false);
   }).catch(function () {});
 });
@@ -294,10 +384,10 @@ async function initializeExtension(existing) {
   await chrome.storage.local.set(settings); // DEFAULTS keys only (see mergedSettings)
   await syncRuntimeState(settings);
 
-  // Also rebuild when the last report predates site-specific hiding, so an
-  // update takes effect now instead of at the next daily refresh.
+  // Upgrade old installs to refreshable core data without waiting 48 hours.
   const report = settings.filterReport;
-  if (settings.adBlock !== false && settings.useFilterLists !== false && (!report || !report.siteCosmetics)) {
+  if (settings.adBlock !== false && settings.useFilterLists !== false && (!report || !report.siteCosmetics ||
+      !report.siteCosmetics.engineRevision || !report.core || !Number.isFinite(report.core.regex))) {
     await rebuildFilters(false);
   }
   return settings;
@@ -307,16 +397,19 @@ async function initializeExtension(existing) {
 // ones. Applied on update and recorded, so a user who later turns a feature
 // back off keeps that choice.
 const DEFAULTS_REVISION_KEY = "defaultsRevision";
-const DEFAULTS_REVISION = 1;
+const DEFAULTS_REVISION = 2;
 
 function defaultsMigrationPatch(reason, stored) {
   if ((stored[DEFAULTS_REVISION_KEY] || 0) >= DEFAULTS_REVISION) return null;
   const patch = { [DEFAULTS_REVISION_KEY]: DEFAULTS_REVISION };
   if (reason === "update") {
     // Revision 1: tracking protection on, and AdGuard Base site-specific hiding.
-    patch.strictTracking = true;
+    if ((stored[DEFAULTS_REVISION_KEY] || 0) < 1) patch.strictTracking = true;
     const lists = Array.isArray(stored.filterLists) ? stored.filterLists.slice() : DEFAULTS.filterLists.slice();
     if (lists.indexOf("adguard-base") === -1) lists.push("adguard-base");
+    for (const id of ["ublock-ads", "ublock-unbreak", "ublock-quick-fixes"]) {
+      if (lists.indexOf(id) === -1) lists.push(id);
+    }
     patch.filterLists = lists;
   }
   return patch;
@@ -403,8 +496,10 @@ chrome.runtime.onInstalled.addListener(function (details) {
 });
 
 chrome.runtime.onStartup.addListener(function () {
-  readSettings().then(function (data) {
-    return syncRuntimeState(mergedSettings(data));
+  readSettings().then(async function (data) {
+    const settings = mergedSettings(data);
+    await syncRuntimeState(settings);
+    await refreshIfOverdue(settings, true);
   }).catch(function (e) {
     console.warn("[AdBlockerPro] startup sync failed:", e && e.message ? e.message : e);
   });
@@ -412,8 +507,10 @@ chrome.runtime.onStartup.addListener(function () {
 
 /* Keep session whitelist rules and registered MAIN-world scripts correct after
  * a service-worker restart as well, not only after a full browser restart. */
-readSettings().then(function (data) {
-  return syncRuntimeState(mergedSettings(data));
+readSettings().then(async function (data) {
+  const settings = mergedSettings(data);
+  await syncRuntimeState(settings);
+  await refreshIfOverdue(settings, false);
 }).catch(function () {});
 
 /* Badge: live count of blocked items reported by page modules. */
@@ -444,6 +541,7 @@ async function applySettingsPatch(patch) {
   patch = patch && typeof patch === "object" ? patch : {};
   await chrome.storage.local.set(patch);
   const settings = mergedSettings(await readSettings());
+  if (typeof CORE_FILTERS.prune === "function") await CORE_FILTERS.prune(settings);
 
   const runtimeKeys = ["adBlock", "strictTracking", "antiAdblock", "ytSkip", "fbSponsored", "whitelist"];
   if (runtimeKeys.some((key) => Object.prototype.hasOwnProperty.call(patch, key))) {
@@ -451,7 +549,9 @@ async function applySettingsPatch(patch) {
   }
 
   if (Object.prototype.hasOwnProperty.call(patch, "adBlock") ||
-      Object.prototype.hasOwnProperty.call(patch, "useFilterLists")) {
+      Object.prototype.hasOwnProperty.call(patch, "useFilterLists") ||
+      Object.prototype.hasOwnProperty.call(patch, "strictTracking") ||
+      Object.prototype.hasOwnProperty.call(patch, "filterLists")) {
     await syncDynamicFilters(settings, settings.adBlock !== false && settings.useFilterLists !== false);
   }
 
@@ -488,6 +588,9 @@ chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
   if (!msg || !msg.type) return false;
 
   switch (msg.type) {
+    case "syncEngineScriptlets":
+      syncEngineScriptlets(sender).then(sendResponse).catch(function () { sendResponse({ applied: 0 }); });
+      return true;
     case "abpBlocked":
     case "adBlocked": {
       // `added` is how many were newly blocked since the module's last

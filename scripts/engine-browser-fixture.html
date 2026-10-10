@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>AdBlock engine browser regression fixture</title>
+<style>body{font:16px system-ui;background:#f5f7fa;color:#14243a;margin:24px}.fixture-card{padding:18px;margin:12px 0;background:white;border:1px solid #ccd6e0;border-radius:8px}.ad-label{color:#a51c1c}#results{white-space:pre-wrap;font:14px monospace}button{padding:12px 18px}h1{font-size:24px}</style>
+<script src="/advanced-rules.js" defer></script><script src="/procedural-engine.js" defer></script>
+<script src="/scriptlet-engine.js" defer></script><script src="/fixture-setup.js" defer></script>
+<script src="/content.js" defer></script><script src="/fixture-tests.js" defer></script>
+</head><body><h1>Local engine regression fixture</h1>
+<p>This tests real DOM/CSS/MutationObserver behavior with a local storage fixture. It does not load an extension or access any account.</p>
+<button id="run">Run browser tests</button><pre id="results">Ready</pre>
+<div id="ad" class="fixture-card"><span class="ad-label">Sponsored</span><p>Test advertisement</p></div>
+<article id="organic" class="fixture-card"><p>Organic content discussing advertising and Sponsored posts.</p></article>
+<div id="protected" class="fixture-card"><span class="ad-label">Sponsored</span><main>Protected main content must remain visible.</main></div>
+</body></html>

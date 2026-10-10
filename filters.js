@@ -3,8 +3,8 @@
  *
  *  Design goals
  *  ------------
- *  1. Treat bundled static DNR rules as the primary global network layer.
- *  2. Use dynamic DNR quota only for coverage that is not already bundled.
+ *  1. Keep bundled static DNR rules as an offline global-network fallback.
+ *  2. Replace core groups with validated official snapshots, without overlap.
  *  3. Never broaden an upstream rule by silently ignoring syntax we do not
  *     understand. Unsupported options are rejected (fail closed).
  *  4. Deduplicate twice: raw text first, then the compiled DNR meaning.
@@ -18,11 +18,13 @@
  * ========================================================================== */
 
 "use strict";
+const ADVANCED_FILTERS = typeof module !== "undefined" && module.exports ? require("./advanced-rules.js") : ADV_RULES;
 
 const FILTERS = {
+  core: null,                   // Installed by background.js; converter tests can run independently.
   MAX_DYNAMIC_RULES: 29000,      // Chrome safe-dynamic ceiling is 30,000; keep headroom.
   MAX_CANDIDATE_RULES: 60000,    // Pre-compaction guard against pathological source growth.
-  MAX_COSMETIC_SELECTORS: 4000,
+  MAX_COSMETIC_SELECTORS: 8000,
   RULE_ID_BASE: 100000,
   STORAGE_KEY: "filterLists",
   CSS_KEY: "cosmeticCss",
@@ -30,6 +32,7 @@ const FILTERS = {
   COSMETIC_FP_KEY: "filterCosmeticFingerprint",
   FETCH_TIMEOUT_MS: 20000,
   MAX_FILTER_DOWNLOAD_BYTES: 8 * 1024 * 1024,
+  FETCH_CONCURRENCY: 3,
 
   // Site-specific element hiding ("example.com##.ad", "example.com#@#.ad").
   // Stored one key per domain so a page reads only its own entries; see
@@ -46,12 +49,29 @@ const FILTERS = {
   ],
 
   /*
-   * Source capabilities are explicit. EasyList/EasyPrivacy network rules are
-   * already bundled as static DNR rulesets, so repeating them dynamically only
-   * wastes the limited dynamic quota. EasyList is still useful for generic
-   * cosmetic selectors, therefore it remains a cosmetic-only runtime source.
+   * Source capabilities are explicit. Native EasyList/EasyPrivacy snapshots
+   * are handled by core-filters.js; do not reconvert their text network rules.
+   * EasyList text remains useful for generic and site cosmetic selectors.
    */
   SOURCES: [
+    {
+      id: "ublock-ads",
+      name: "uBlock Ads cosmetics",
+      url: "https://raw.githubusercontent.com/uBlockOrigin/uAssets/master/filters/filters.txt",
+      enabled: true, network: false, cosmetic: true, priority: 130, role: "core-cosmetic"
+    },
+    {
+      id: "ublock-unbreak",
+      name: "uBlock Unbreak cosmetics",
+      url: "https://raw.githubusercontent.com/uBlockOrigin/uAssets/master/filters/unbreak.txt",
+      enabled: true, network: false, cosmetic: true, priority: 140, role: "core-cosmetic"
+    },
+    {
+      id: "ublock-quick-fixes",
+      name: "uBlock Quick Fixes cosmetics",
+      url: "https://raw.githubusercontent.com/uBlockOrigin/uAssets/master/filters/quick-fixes.txt",
+      enabled: true, network: false, cosmetic: true, priority: 150, role: "core-cosmetic"
+    },
     {
       // Previously pointed at filters.adtidy.org/.../25.txt, which is AdGuard's
       // Mail Tracking Protection filter, not an Arabic list.
@@ -128,9 +148,9 @@ const FILTERS = {
   },
 
   isManagedRuleId(id) {
-    return Number.isInteger(id) &&
+    return (this.core && this.core.owns(id)) || (Number.isInteger(id) &&
       id >= FILTERS.RULE_ID_BASE &&
-      id < FILTERS.RULE_ID_BASE + FILTERS.MAX_DYNAMIC_RULES;
+      id < FILTERS.RULE_ID_BASE + FILTERS.MAX_DYNAMIC_RULES);
   },
 
   /* ---------------------------------------------------------------- *
@@ -314,17 +334,21 @@ const FILTERS = {
       const s = line.trim();
       if (!s || s[0] === "!" || s[0] === "[") continue;
 
-      let idx = s.indexOf("#@#");
-      let unhide = true;
-      if (idx <= 0) {
-        idx = s.indexOf("##");
-        unhide = false;
-      }
+      const marker = /#@\?#|#@#|#\?#|##/.exec(s);
+      const idx = marker ? marker.index : -1;
+      const unhide = marker && marker[0].startsWith("#@");
       if (idx <= 0) continue;
-      if (/#[?$%]#|#@[?$%]#/.test(s)) continue; // extended / scriptlet / CSS-injection forms
+      if (/#[\$%]#|#@[\$%]#/.test(s)) continue;
 
-      const sel = s.slice(idx + (unhide ? 3 : 2)).trim();
-      if (!FILTERS.safeSelector(sel) || FILTERS.EXTENDED_COSMETIC.test(sel)) continue;
+      const sel = s.slice(idx + marker[0].length).trim();
+      let kind = unhide ? "u" : "h";
+      if (sel.startsWith("+js(")) {
+        if (!(unhide && sel === "+js()") && !ADVANCED_FILTERS.scriptlet(sel)) continue;
+        kind = unhide ? "su" : "s";
+      } else if (FILTERS.EXTENDED_COSMETIC.test(sel)) {
+        if (!ADVANCED_FILTERS.procedural(sel)) continue;
+        kind = unhide ? "pu" : "p";
+      } else if (!FILTERS.safeSelector(sel)) continue;
 
       const domains = s.slice(0, idx).split(",").map((d) => d.trim().toLowerCase()).filter(Boolean);
       if (!domains.length || domains.some((d) => d[0] === "~" || d.includes("*") || !/^[a-z0-9.-]+$/.test(d))) continue;
@@ -334,7 +358,8 @@ const FILTERS = {
         if (FILTERS.isSiteCosmeticExcluded(d)) continue;
         let entry = into.get(d);
         if (!entry) { entry = { h: new Set(), u: new Set() }; into.set(d, entry); }
-        (unhide ? entry.u : entry.h).add(sel);
+        if (!entry[kind]) entry[kind] = new Set();
+        if (entry[kind].size < (kind.startsWith("s") ? 64 : kind.startsWith("p") ? 128 : 2000)) entry[kind].add(sel);
         count++;
       }
     }
@@ -345,7 +370,7 @@ const FILTERS = {
    * Persist site cosmetics as one "cf:<domain>" key per domain. After the
    * first build only changed domains are written and vanished ones removed:
    * every open tab's content scripts receive storage.onChanged with the full
-   * changed values, so rewriting ~3 MB on each daily refresh would push all of
+   * changed values, so rewriting ~3 MB on each scheduled refresh would push all of
    * it into every tab.
    */
   async installSiteCosmetics(map) {
@@ -357,7 +382,8 @@ const FILTERS = {
       const value = {};
       if (e.h.size) value.h = Array.from(e.h).sort();
       if (e.u.size) value.u = Array.from(e.u).sort();
-      const size = d.length + JSON.stringify(value).length;
+      for (const kind of ["p", "pu", "s", "su"]) if (e[kind] && e[kind].size) value[kind] = Array.from(e[kind]).sort();
+      const size = new TextEncoder().encode(FILTERS.SITE_CSS_PREFIX + d + JSON.stringify(value)).byteLength;
       if (bytes + size > FILTERS.MAX_SITE_COSMETIC_BYTES) break;
       bytes += size;
       next[FILTERS.SITE_CSS_PREFIX + d] = value;
@@ -372,9 +398,14 @@ const FILTERS = {
     for (const key of Object.keys(next)) {
       if (JSON.stringify(all[key]) !== JSON.stringify(next[key])) toSet[key] = next[key];
     }
-    if (toRemove.length) await chrome.storage.local.remove(toRemove);
     if (Object.keys(toSet).length) await chrome.storage.local.set(toSet);
-    return { domains: Object.keys(next).length, written: Object.keys(toSet).length, removed: toRemove.length, bytes };
+    // If persistence fails, do not first delete old site coverage.
+    if (toRemove.length) await chrome.storage.local.remove(toRemove);
+    return { domains: Object.keys(next).length, written: Object.keys(toSet).length, removed: toRemove.length, bytes,
+      truncated: Object.keys(next).length < domains.length,
+      engineRevision: 1,
+      procedural: Object.values(next).reduce((sum, entry) => sum + (entry.p || []).length, 0),
+      scriptlets: Object.values(next).reduce((sum, entry) => sum + (entry.s || []).length, 0) };
   },
 
   /** Pull conservative generic element-hiding selectors out of a list. */
@@ -390,7 +421,7 @@ const FILTERS = {
       if (idx === -1 || idx > 0) continue; // domain-specific selectors need per-site scoping
 
       const sel = s.slice(idx + 2).trim();
-      if (!FILTERS.safeSelector(sel) || sel.startsWith("+js") || sel.startsWith("^")) continue;
+      if (!FILTERS.safeSelector(sel) || FILTERS.EXTENDED_COSMETIC.test(sel) || sel.startsWith("+js") || sel.startsWith("^")) continue;
       if (sel.includes(":has(") || sel.includes(":not(:") ||
           sel.includes(":matches-css") || sel.includes(":xpath") ||
           sel.includes(":upward") || sel.includes(":style")) continue;
@@ -399,6 +430,15 @@ const FILTERS = {
       if (++count >= maxSelectors) break;
     }
     return generic;
+  },
+
+  parseGenericExceptions(text, into) {
+    for (const line of text.split("\n")) {
+      const entry = line.trim();
+      if (!entry.startsWith("#@#")) continue;
+      const selector = entry.slice(3).trim();
+      if (FILTERS.safeSelector(selector) && !FILTERS.EXTENDED_COSMETIC.test(selector)) into.add(selector);
+    }
   },
 
   /** SHA-256 fingerprint with a deterministic fallback for test environments. */
@@ -524,7 +564,7 @@ const FILTERS = {
     throw new Error("filter list has no usable rules");
   },
 
-  async fetchList(url) {
+  async fetchText(url) {
     const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
     const timer = controller ? setTimeout(() => controller.abort(), FILTERS.FETCH_TIMEOUT_MS) : null;
     try {
@@ -565,7 +605,6 @@ const FILTERS = {
         reader.releaseLock();
       }
       const text = parts.join("");
-      FILTERS.validateListText(text);
       return text;
     } catch (err) {
       if (err && err.name === "AbortError") throw new Error("download timeout");
@@ -575,9 +614,32 @@ const FILTERS = {
     }
   },
 
+  async fetchList(url) {
+    const text = await FILTERS.fetchText(url);
+    FILTERS.validateListText(text);
+    return text;
+  },
+
+  async boundedJobs(items, job) {
+    const results = new Array(items.length);
+    let cursor = 0;
+    let failure = null;
+    await Promise.all(Array.from({ length: Math.min(FILTERS.FETCH_CONCURRENCY, items.length) }, async () => {
+      while (cursor < items.length && !failure) {
+        const index = cursor++;
+        try { results[index] = await job(items[index]); }
+        catch (error) { if (!failure) failure = { error }; }
+      }
+    }));
+    // Settle in-flight jobs before declaring failure, so a retry cannot overlap
+    // unfinished fetches from the rejected snapshot.
+    if (failure) throw failure.error;
+    return results;
+  },
+
   /** Download selected runtime sources concurrently. */
   async fetchSelectedSources(selected, onProgress) {
-    const jobs = selected.map(async (src) => {
+    return FILTERS.boundedJobs(selected, async (src) => {
       if (!src.network && !src.cosmetic) {
         return { src, skipped: true, reason: "bundled-static" };
       }
@@ -589,7 +651,6 @@ const FILTERS = {
         return { src, ok: false, error: e && e.message ? e.message : String(e) };
       }
     });
-    return Promise.all(jobs);
   },
 
   /**
@@ -601,7 +662,8 @@ const FILTERS = {
       FILTERS.STORAGE_KEY,
       FILTERS.CSS_KEY,
       FILTERS.NETWORK_FP_KEY,
-      FILTERS.COSMETIC_FP_KEY
+      FILTERS.COSMETIC_FP_KEY,
+      "adBlock", "useFilterLists", "strictTracking"
     ]);
     const enabledIds = Array.isArray(stored[FILTERS.STORAGE_KEY])
       ? stored[FILTERS.STORAGE_KEY]
@@ -629,6 +691,18 @@ const FILTERS = {
       }
     };
 
+    let coreSnapshot = null;
+    if (FILTERS.core) {
+      try {
+        if (onProgress) onProgress("Fetching official core network rules…");
+        coreSnapshot = await FILTERS.core.fetch(FILTERS, stored);
+      } catch (err) {
+        report.installOk = false;
+        report.error = "Core filter update failed; keeping installed rules: " + (err.message || String(err));
+        report.rules = await FILTERS.count();
+        return report;
+      }
+    }
     const fetchResults = await FILTERS.fetchSelectedSources(selected, onProgress);
     const resultById = new Map(fetchResults.map((result) => [result.src.id, result]));
     const sourceStats = new Map();
@@ -671,6 +745,7 @@ const FILTERS = {
     const seenRaw = new Set();
     const seenSemantic = new Set();
     const selectors = new Set();
+    const genericExceptions = new Set();
     const siteCosmetics = new Map();
     const candidates = [];
     let sequence = 0;
@@ -734,8 +809,12 @@ const FILTERS = {
         for (const sel of FILTERS.parseCosmetic(result.text, remaining)) selectors.add(sel);
         stat.selectors += selectors.size - beforeSelectors;
       }
-      if (src.cosmetic) stat.siteRules = FILTERS.parseSiteCosmetic(result.text, siteCosmetics);
+      if (src.cosmetic) {
+        stat.siteRules = FILTERS.parseSiteCosmetic(result.text, siteCosmetics);
+        FILTERS.parseGenericExceptions(result.text, genericExceptions);
+      }
     }
+    for (const selector of genericExceptions) selectors.delete(selector);
 
     // If any network-bearing source failed, never replace the previous known-good
     // network ruleset with a partial one.
@@ -755,18 +834,31 @@ const FILTERS = {
     const ordered = exceptions.concat(blocks);
     if (ordered.length > FILTERS.MAX_DYNAMIC_RULES) report.truncated = true;
 
-    const selectedRecords = ordered.slice(0, FILTERS.MAX_DYNAMIC_RULES);
+    const existing = await chrome.declarativeNetRequest.getDynamicRules();
+    const foreign = existing.filter(rule => !FILTERS.isManagedRuleId(rule.id));
+    const coreRules = coreSnapshot ? coreSnapshot.rules : [];
+    const budget = FILTERS.MAX_DYNAMIC_RULES - foreign.length - coreRules.length;
+    const unsafe = coreRules.concat(foreign).filter(rule => !["block", "allow", "allowAllRequests", "upgradeScheme"].includes(rule.action.type)).length;
+    const regexCount = coreRules.concat(foreign).filter(rule => rule.condition.regexFilter !== undefined).length;
+    if (budget < 0 || (FILTERS.core && (unsafe > FILTERS.core.MAX_UNSAFE_RULES || regexCount > FILTERS.core.MAX_REGEX_RULES))) {
+      report.installOk = false;
+      report.error = "Core filter snapshot exceeds available DNR quota; keeping installed rules.";
+      report.rules = await FILTERS.count();
+      return report;
+    }
+    if (ordered.length > budget) report.truncated = true;
+    const selectedRecords = ordered.slice(0, budget);
     for (const stat of report.sources) stat.installed = 0;
     for (const rec of selectedRecords) {
       const stat = sourceStats.get(rec.sourceId);
       if (stat) stat.installed++;
     }
 
-    const all = selectedRecords.map((rec, index) => {
+    const all = coreRules.concat(selectedRecords.map((rec, index) => {
       const rule = JSON.parse(JSON.stringify(rec.rule));
       rule.id = FILTERS.RULE_ID_BASE + index;
       return rule;
-    });
+    }));
 
     report.rules = all.length;
     report.selectors = selectors.size;
@@ -776,7 +868,14 @@ const FILTERS = {
     );
 
     try {
-      const existing = await chrome.declarativeNetRequest.getDynamicRules();
+      const latestSettings = await chrome.storage.local.get([FILTERS.STORAGE_KEY, "adBlock", "useFilterLists", "strictTracking"]);
+      const settingsKey = settings => JSON.stringify({
+        adBlock: settings.adBlock !== false, useFilterLists: settings.useFilterLists !== false,
+        strictTracking: settings.strictTracking !== false,
+        lists: (Array.isArray(settings[FILTERS.STORAGE_KEY]) ? settings[FILTERS.STORAGE_KEY] :
+          FILTERS.SOURCES.filter(source => source.enabled).map(source => source.id)).slice().sort()
+      });
+      if (settingsKey(stored) !== settingsKey(latestSettings)) throw new Error("settings changed during filter download; update canceled");
       const managedExisting = existing.filter((rule) => FILTERS.isManagedRuleId(rule.id));
       const removeIds = managedExisting.map((rule) => rule.id);
       const networkUnchanged = stored[FILTERS.NETWORK_FP_KEY] === networkFingerprint &&
@@ -799,11 +898,25 @@ const FILTERS = {
         report.networkChanged = true;
         if (onProgress) onProgress("Installed " + all.length.toLocaleString() + " rules");
       }
+      // The native API is asynchronous. A user can disable lists/tracking
+      // while it is applying the already validated snapshot. Never leave that
+      // stale snapshot active or disable fallback based on stale settings.
+      const installedSettings = await chrome.storage.local.get([FILTERS.STORAGE_KEY, "adBlock", "useFilterLists", "strictTracking"]);
+      if (settingsKey(stored) !== settingsKey(installedSettings)) {
+        await FILTERS.clear();
+        throw new Error("settings changed while installing filters; stale snapshot cleared");
+      }
+      if (coreSnapshot) {
+        report.core = { revision: coreSnapshot.revision, counts: coreSnapshot.counts, rules: coreRules.length, regex: coreSnapshot.regex || 0,
+          regexCandidates: coreSnapshot.regexCandidates || 0, regexRejected: coreSnapshot.regexRejected || [] };
+        await chrome.storage.local.set({ coreFilterState: { ...report.core, updatedAt: Date.now() } });
+        await FILTERS.core.syncStatic(installedSettings);
+      }
     } catch (ruleErr) {
       report.installOk = false;
       report.error = ruleErr && ruleErr.message ? ruleErr.message : String(ruleErr);
       report.rules = await FILTERS.count();
-      console.warn("[Filters] Dynamic rules update failed; previous rules kept:", report.error);
+      console.warn("[Filters] Refresh failed; available installed rules retained:", report.error);
       return report;
     }
 
@@ -840,7 +953,10 @@ const FILTERS = {
         [FILTERS.NETWORK_FP_KEY]: networkFingerprint,
         [FILTERS.COSMETIC_FP_KEY]: cosmeticFingerprint
       });
-    } catch (_) {}
+    } catch (storageErr) {
+      report.cosmeticRefreshOk = false;
+      report.error = "Filter metadata/CSS could not be saved: " + (storageErr.message || String(storageErr));
+    }
 
     return report;
   },
@@ -857,6 +973,10 @@ const FILTERS = {
 
   /** Remove only dynamic rules owned by this filter engine. */
   async clear() {
+    if (FILTERS.core) {
+      await chrome.storage.local.set({ coreFilterState: null });
+      await FILTERS.core.syncStatic(await chrome.storage.local.get(["adBlock", "useFilterLists", "strictTracking"]));
+    }
     const existing = await chrome.declarativeNetRequest.getDynamicRules();
     const removeRuleIds = existing
       .filter((rule) => FILTERS.isManagedRuleId(rule.id))

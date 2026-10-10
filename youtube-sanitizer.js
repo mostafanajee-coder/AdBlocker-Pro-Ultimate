@@ -47,6 +47,7 @@
     "mealbarPromoRenderer",
     "enforcementMessageViewModel"
   ].forEach(function (key) { AD_RENDERER_KEYS[key] = true; });
+  var AD_MARKER_KEYS = Object.keys(AD_KEYS).concat(Object.keys(AD_RENDERER_KEYS));
 
   function isObject(value) {
     return value !== null && typeof value === "object";
@@ -99,15 +100,10 @@
 
   function hasAdMarkers(text) {
     if (typeof text !== "string" || text.length === 0) return false;
-    return text.indexOf("adPlacements") !== -1 ||
-           text.indexOf("playerAds") !== -1 ||
-           text.indexOf("adSlots") !== -1 ||
-           text.indexOf("adBreakHeartbeatParams") !== -1 ||
-           text.indexOf("adSlotRenderer") !== -1 ||
-           text.indexOf("inFeedAdLayoutRenderer") !== -1 ||
-           text.indexOf("promotedSparklesWebRenderer") !== -1 ||
-           text.indexOf("reelWatchEndpoint") !== -1 ||
-           text.indexOf("enforcementMessageViewModel") !== -1;
+    for (var i = 0; i < AD_MARKER_KEYS.length; i++) {
+      if (text.indexOf(AD_MARKER_KEYS[i]) !== -1) return true;
+    }
+    return text.indexOf("reelWatchEndpoint") !== -1;
   }
 
   /**

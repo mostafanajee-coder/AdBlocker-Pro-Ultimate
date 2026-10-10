@@ -28,7 +28,7 @@ function listeners() {
 
 // `alarms` is shared between boots to model a service-worker restart:
 // Chrome keeps alarms across restarts, the script's in-memory state is lost.
-function boot(initialStore, alarms) {
+function boot(initialStore, alarms, options = {}) {
   const store = JSON.parse(JSON.stringify(initialStore));
   const setKeys = [];
   const handlers = {};
@@ -49,7 +49,8 @@ function boot(initialStore, alarms) {
     alarms: {
       get: (name, cb) => cb(alarms.byName[name]),
       create: (name, info) => { alarms.created++; alarms.byName[name] = Object.assign({ name }, info); },
-      onAlarm: { addListener() {} }
+      clear: async name => { delete alarms.byName[name]; },
+      onAlarm: { addListener: listener => { handlers.alarm = listener; } }
     },
     tabs,
     storage: {
@@ -80,8 +81,9 @@ function boot(initialStore, alarms) {
   const context = vm.createContext({
     chrome, console, setTimeout, URL, Promise, Object, Array, Set, Map, Math, Date, JSON, Error,
     importScripts: () => {
+      context.CORE_FILTERS = {};
       context.FILTERS = {
-        rebuild: async () => { rebuilds.push(true); return { installOk: true, siteCosmetics: { domains: 1 } }; },
+        rebuild: async () => { rebuilds.push(true); return options.fail ? { installOk: false, error: "simulated outage" } : { installOk: true, core: { rules: 6 }, siteCosmetics: { domains: 1 } }; },
         clear: async () => {},
         count: async () => 0
       };
@@ -99,7 +101,9 @@ function boot(initialStore, alarms) {
     async message(msg, tabId) {
       onMessage.fire(msg, { tab: { id: tabId } }, () => {});
       await settle();
-    }
+    },
+    async alarm(name) { handlers.alarm({ name }); await settle(); },
+    settle
   };
 }
 
@@ -117,7 +121,8 @@ async function run() {
   await old.install("update");
   check(old.store.strictTracking === true, "tracking protection is switched on once for an existing install");
   check(old.store.filterLists.includes("adguard-base") && old.store.filterLists.includes("arabic"), "AdGuard Base is added to the existing list selection, keeping the rest");
-  check(old.store.defaultsRevision === 1, "the migration is recorded");
+  check(old.store.defaultsRevision === 2, "the migration is recorded");
+  check(old.store.filterLists.includes("ublock-quick-fixes") && old.store.filterLists.includes("ublock-unbreak"), "existing installs gain uBlock fixes without replacing their list selection");
   check(old.store.__rulesets && old.store.__rulesets.enableRulesetIds.includes("easyprivacy"), "the EasyPrivacy ruleset is enabled right away");
   check(old.rebuilds.length === 1, "filters are rebuilt immediately so site hiding applies without waiting a day");
   check(!old.setKeys.some((k) => k.startsWith("cf:")), "the per-site hiding entries are never rewritten as settings");
@@ -133,18 +138,48 @@ async function run() {
   const fresh = boot({});
   await fresh.install("install");
   check(fresh.store.strictTracking === true, "a fresh install starts with tracking protection on");
-  check(fresh.store.filterLists.join(",") === "arabic,easylist,adguard-base", "a fresh install starts with the three runtime lists");
-  check(fresh.store.defaultsRevision === 1, "a fresh install is marked as already on the current defaults");
+  check(fresh.store.filterLists.length === 6 && fresh.store.filterLists.includes("ublock-ads"), "a fresh install starts with all six runtime cosmetic/regional lists");
+  check(fresh.store.defaultsRevision === 2, "a fresh install is marked as already on the current defaults");
 
-  console.log("\nDaily filter refresh\n--------------------");
+  console.log("\n48-hour filter refresh\n----------------------");
   const alarms = { byName: {}, created: 0 };
   boot({}, alarms);
   await new Promise((r) => setImmediate(r));
   const first = alarms.byName.filterRefresh;
-  check(first && first.periodInMinutes === 24 * 60, "the daily refresh alarm is created");
+  check(first && first.periodInMinutes === 48 * 60, "the 48-hour refresh alarm is created");
   for (let i = 0; i < 5; i++) boot({}, alarms); // the service worker wakes again and again
   await new Promise((r) => setImmediate(r));
   check(alarms.created === 1 && alarms.byName.filterRefresh === first, "waking the service worker again does not recreate (and so postpone) it");
+
+  const legacyAlarms = { byName: { filterRefresh: { periodInMinutes: 24 * 60 } }, created: 0 };
+  const recent = Date.now() - 60 * 60 * 1000;
+  const migrated = boot({ lastFilterRefresh: recent }, legacyAlarms);
+  await migrated.settle();
+  check(legacyAlarms.byName.filterRefresh.periodInMinutes === 48 * 60 && Math.abs(legacyAlarms.byName.filterRefresh.when - recent - 48 * 60 * 60 * 1000) < 1000, "legacy alarm migrates once and remains anchored to the last successful update");
+
+  const overdue = boot({ lastFilterRefresh: Date.now() - 49 * 60 * 60 * 1000 });
+  await overdue.settle();
+  check(overdue.rebuilds.length === 1 && Date.now() - overdue.store.lastFilterRefresh < 5000, "an overdue refresh catches up after worker/browser startup");
+  const failedRefresh = boot({ lastFilterRefresh: Date.now() - 49 * 60 * 60 * 1000 }, undefined, { fail: true });
+  await failedRefresh.settle();
+  const lastGood = failedRefresh.store.lastFilterRefresh;
+  check(failedRefresh.store.lastFilterFailure && failedRefresh.alarms.byName.filterRefreshRetry.delayInMinutes === 60, "failure records an error and schedules a one-hour retry");
+  check(failedRefresh.store.lastFilterRefresh === lastGood && Date.now() - lastGood > 48 * 60 * 60 * 1000, "failure never advances the last-success timestamp");
+  await failedRefresh.alarm("filterRefreshRetry");
+  check(failedRefresh.rebuilds.length === 2, "the retry alarm actually invokes refresh");
+  const throttled = boot(failedRefresh.store);
+  await throttled.settle();
+  check(throttled.rebuilds.length === 0, "worker restarts do not hammer an offline provider before retry is due");
+  check(Math.abs(throttled.alarms.byName.filterRefreshRetry.when - throttled.store.lastFilterFailure.at - 60 * 60 * 1000) < 1000, "a lost retry alarm is restored at its original failure deadline");
+  await throttled.alarm("filterRefresh");
+  check(throttled.rebuilds.length === 0, "an overdue regular alarm cannot bypass the one-hour failure backoff");
+  const disabled = boot({ adBlock: false, lastFilterRefresh: 1 });
+  await disabled.settle();
+  await disabled.alarm("filterRefresh");
+  check(disabled.rebuilds.length === 0, "automatic refresh honors the global opt-out");
+  const revisionOneOptOut = boot({ defaultsRevision: 1, strictTracking: false });
+  await revisionOneOptOut.install("update");
+  check(revisionOneOptOut.store.strictTracking === false && revisionOneOptOut.store.filterLists.includes("ublock-quick-fixes"), "new list migration does not reset a previous tracking opt-out");
 
   console.log("\nBlocked counters\n----------------");
   const c = boot({ totalBlocked: 10, todayBlocked: 0, lastBlockedDate: "" });

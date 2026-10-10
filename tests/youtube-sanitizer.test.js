@@ -90,6 +90,12 @@ check(cleanXssi.startsWith(")]}'\n"), "preserves an XSSI prefix");
 check(!("adSlots" in JSON.parse(cleanXssi.slice(5))), "cleans prefixed JSON");
 check(YT.sanitizeText('{"videoDetails":{"videoId":"plain"}}') === '{"videoDetails":{"videoId":"plain"}}', "fast-passes responses without ad markers");
 
+for (const renderer of ["displayAdRenderer", "promotedVideoRenderer", "compactPromotedVideoRenderer", "searchPyvRenderer", "videoMastheadAdV3Renderer", "playerLegacyDesktopWatchAdsRenderer", "mealbarPromoRenderer"]) {
+  const textResponse = JSON.stringify({ contents: [{ [renderer]: { id: "ad" } }, { videoRenderer: { videoId: "keep" } }] });
+  const cleaned = JSON.parse(YT.sanitizeText(textResponse));
+  check(cleaned.contents.length === 1 && cleaned.contents[0].videoRenderer.videoId === "keep", "text-reader interception removes " + renderer + " while preserving normal videos");
+}
+
 const cyclic = { videoDetails: { videoId: "cycle" }, adSlots: [{}] };
 cyclic.self = cyclic;
 YT.sanitize(cyclic);

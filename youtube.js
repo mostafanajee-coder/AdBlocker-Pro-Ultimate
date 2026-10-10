@@ -25,6 +25,10 @@
   var lastVideo = null;
   var previousMuted = false;
   var videoWasPlaying = false;
+  var videoPageKey = "";
+  var manuallyPausedVideo = null;
+  var MAX_AD_RETRIES = 12;
+  var AD_RETRY_DELAY = 100;
 
   var HIDE_SELECTORS = [
     "ytd-ad-slot-renderer",
@@ -165,6 +169,7 @@
 
   function bindPlayer(candidate) {
     if (candidate === player) return;
+    finishAd(false);
     if (playerObserver) playerObserver.disconnect();
     player = candidate;
 
@@ -184,6 +189,7 @@
     lastVideo = video;
     previousMuted = Boolean(video.muted);
     videoWasPlaying = !video.paused;
+    videoPageKey = pageKey();
   }
 
   function clickHiddenSkipControls(candidate) {
@@ -191,13 +197,17 @@
       if (typeof candidate.skipAd === "function") candidate.skipAd();
     } catch (_) {}
 
-    var buttons = document.querySelectorAll(SKIP_SELECTORS);
+    if (!playerIsShowingAd(candidate)) return;
+    var buttons = candidate.querySelectorAll(SKIP_SELECTORS);
     for (var i = 0; i < buttons.length; i++) {
+      if (!playerIsShowingAd(candidate)) break;
       try { buttons[i].click(); } catch (_) {}
     }
   }
 
   function instantEndAd(candidate) {
+    // A synchronous skip can already have switched to the real video.
+    if (!playerIsShowingAd(candidate)) return;
     var video = candidate.querySelector("video.html5-main-video, video.video-stream") ||
                 document.querySelector("video.html5-main-video, video.video-stream");
     if (!video) return;
@@ -215,13 +225,22 @@
     } catch (_) {}
   }
 
-  function finishAd() {
+  function pageKey() {
+    return (window.location.pathname || "") + (window.location.search || "");
+  }
+
+  function finishAd(allowResume) {
+    if (burstId) { clearTimeout(burstId); burstId = 0; }
     var docRoot = root();
     if (docRoot) docRoot.removeAttribute(ROOT_AD_ACTIVE);
 
     if (lastVideo) {
       try { lastVideo.muted = previousMuted; } catch (_) {}
-      if (videoWasPlaying && lastVideo.paused) {
+      var current = findPlayer();
+      var currentVideo = current && current.querySelector("video.html5-main-video, video.video-stream");
+      if (allowResume !== false && videoWasPlaying && lastVideo !== manuallyPausedVideo &&
+          lastVideo.paused && !lastVideo.ended && currentVideo === lastVideo &&
+          videoPageKey === pageKey() && document.contains(lastVideo)) {
         try {
           var playPromise = lastVideo.play();
           if (playPromise && typeof playPromise.catch === "function") {
@@ -233,24 +252,29 @@
 
     lastVideo = null;
     videoWasPlaying = false;
+    videoPageKey = "";
   }
 
   function scheduleBurst() {
-    if (burstId || typeof requestAnimationFrame !== "function") return;
+    if (burstId) return;
     burstFrames = 0;
 
     var tick = function () {
       burstId = 0;
-      if (!enabled || !playerIsShowingAd(player) || burstFrames++ >= 30) {
+      if (!enabled || !playerIsShowingAd(player) || burstFrames++ >= MAX_AD_RETRIES) {
         if (!playerIsShowingAd(player)) finishAd();
         return;
       }
 
       suppressCurrentAd(false);
-      burstId = requestAnimationFrame(tick);
+      if (enabled && playerIsShowingAd(player) && burstFrames < MAX_AD_RETRIES) {
+        burstId = setTimeout(tick, AD_RETRY_DELAY);
+      }
     };
 
-    burstId = requestAnimationFrame(tick);
+    // rAF is suspended in hidden tabs. A bounded timer burst keeps recovery
+    // working in the background without a permanent playback polling loop.
+    burstId = setTimeout(tick, AD_RETRY_DELAY);
   }
 
   function suppressCurrentAd(startBurst) {
@@ -265,7 +289,10 @@
 
     var docRoot = root();
     if (docRoot) docRoot.setAttribute(ROOT_AD_ACTIVE, "1");
+    rememberVideo(current.querySelector("video.html5-main-video, video.video-stream"));
     clickHiddenSkipControls(current);
+    if (findPlayer() !== current) { bindPlayer(findPlayer()); schedule(); return; }
+    if (!playerIsShowingAd(current)) { finishAd(); return; }
     instantEndAd(current);
 
     if (startBurst !== false) scheduleBurst();
@@ -310,7 +337,7 @@
       try { if (typeof current.focus === "function") current.focus(); } catch (_) {}
       var video = current.querySelector("video.html5-main-video, video.video-stream") ||
                   document.querySelector("video.html5-main-video, video.video-stream");
-      if (video && video.paused) {
+      if (video && video.paused && video !== manuallyPausedVideo && !video.ended) {
         try { if (typeof current.playVideo === "function") current.playVideo(); } catch (_) {}
         try {
           var p = video.play();
@@ -341,6 +368,30 @@
     bindPlayer(findPlayer());
     schedule();
 
+    function notePlaybackIntent(event) {
+      if (!event.isTrusted || !enabled) return;
+      var target = event.target;
+      if (!target || !target.closest) return;
+      if (target.closest("input, textarea, [contenteditable='true']")) return;
+      if (event.type === "keydown") {
+        if (event.ctrlKey || event.altKey || event.metaKey ||
+            ["k", "K", " ", "MediaPlayPause"].indexOf(event.key) === -1) return;
+      } else if (!target.closest(".ytp-play-button, video.html5-main-video, video.video-stream")) {
+        return;
+      }
+      var current = findPlayer();
+      var video = current && current.querySelector("video.html5-main-video, video.video-stream");
+      if (video) manuallyPausedVideo = video.paused ? null : video;
+    }
+    document.addEventListener("click", notePlaybackIntent, true);
+    document.addEventListener("keydown", notePlaybackIntent, true);
+    document.addEventListener("visibilitychange", schedule);
+
+    document.addEventListener("playing", function (event) {
+      if (event.target === manuallyPausedVideo) manuallyPausedVideo = null;
+      if (event.target === lastVideo && !event.target.paused) videoWasPlaying = true;
+    }, true);
+
     if (typeof MutationObserver === "function") {
       var documentObserver = new MutationObserver(function () {
         dismissEnforcement();
@@ -356,7 +407,7 @@
       }, true);
     });
 
-    ["loadedmetadata", "durationchange", "playing"].forEach(function (name) {
+    ["loadedmetadata", "durationchange", "playing", "ended"].forEach(function (name) {
       document.addEventListener(name, function (event) {
         if (event.target && event.target.tagName === "VIDEO") schedule();
       }, true);

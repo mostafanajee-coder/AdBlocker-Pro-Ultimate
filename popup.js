@@ -20,12 +20,12 @@
       strictTracking: "منع التتبع الصارم",
       strictTrackingDesc: "حظر نصوص التجسس وجمع البيانات",
       antiAdblock: "مكافحة كاشفات الحظر",
-      antiAdblockDesc: "تجاوز رسائل عطل مانع الإعلانات",
+      antiAdblockDesc: "وظائف مدمجة بحسب الموقع لتجاوز كشف الحظر",
       mouseUnlock: "فك قيود الفأرة والنسخ",
       mouseUnlockDesc: "تمكين التحديد والزر الأيمن للمواقع المقفلة",
       platformShields: "دروع المنصات الكبرى",
       ytSkip: "يوتيوب (YouTube)",
-      ytSkipDesc: "تخطي الإعلانات الفوري وبدء التشغيل التلقائي",
+      ytSkipDesc: "حجب الإعلانات واستعادة التشغيل بعد تخطيها",
       fbSponsored: "فيسبوك (Facebook)",
       fbSponsoredDesc: "حجب المنشورات الممولة والريلز الممولة فقط",
       fbReels: "إخفاء الريلز بالكامل",
@@ -43,6 +43,14 @@
       updating: "جاري التحديث...",
       rulesActive: "قاعدة ديناميكية مفعلة",
       builtStat: "القواعد الثابتة مدمجة؛ حدّث لبناء القواعد الديناميكية",
+      autoRefresh: "تحديث تلقائي كل 48 ساعة",
+      refreshPaused: "التحديث التلقائي معطل",
+      lastUpdate: "آخر تحديث ناجح",
+      refreshFailed: "تعذر اكتمال التحديث؛ بقيت الحماية المتاحة، وإعادة المحاولة خلال ساعة",
+      proceduralRules: "قواعد إخفاء متقدمة في القاعدة",
+      scriptletRules: "قواعد وظائف مكافحة الكشف (تتطلب تفعيل الخيار)",
+      regexRules: "قواعد شبكة بتعبيرات منتظمة",
+      regexRejected: "قواعد Regex مستبعدة لعدم دعم Chrome لها",
       whitelistTitle: "استثناء الموقع الحالي من الحجب"
     },
     en: {
@@ -60,12 +68,12 @@
       strictTracking: "Strict Tracking",
       strictTrackingDesc: "Block web trackers & spyware telemetry",
       antiAdblock: "Anti-Adblock Bypass",
-      antiAdblockDesc: "Evade adblock detection prompts",
+      antiAdblockDesc: "Packaged site-specific anti-detection functions",
       mouseUnlock: "Mouse & Copy Unlock",
       mouseUnlockDesc: "Re-enable selection & right-click",
       platformShields: "Platform Shields",
       ytSkip: "YouTube",
-      ytSkipDesc: "Instant skip & zero-pause kickstart",
+      ytSkipDesc: "Blocks ads and restores playback after skips",
       fbSponsored: "Facebook",
       fbSponsoredDesc: "Blocks sponsored posts & sponsored Reels only",
       fbReels: "Hide all Reels",
@@ -83,11 +91,44 @@
       updating: "Updating...",
       rulesActive: "active dynamic rules",
       builtStat: "Bundled static rules active; update to build dynamic rules",
+      autoRefresh: "Auto-update every 48 hours",
+      refreshPaused: "Auto-update disabled",
+      lastUpdate: "Last successful update",
+      refreshFailed: "Update incomplete; available protection retained, retry within one hour",
+      proceduralRules: "advanced hiding rules in database",
+      scriptletRules: "anti-detection function rules (requires toggle)",
+      regexRules: "regex network rules",
+      regexRejected: "regex candidates omitted because Chrome does not support them",
       whitelistTitle: "Whitelist current site from blocking"
     }
   };
 
   var currentLang = "ar";
+  var currentFilterSettings = null;
+
+  function renderFilterStatus(settings) {
+    currentFilterSettings = settings || {};
+    var el = document.getElementById("filterStat");
+    if (!el) return;
+    var t = TRANSLATIONS[currentLang];
+    var report = currentFilterSettings.filterReport;
+    var automatic = currentFilterSettings.adBlock !== false && currentFilterSettings.useFilterLists !== false;
+    el.textContent = (report && Number.isFinite(report.rules) ? report.rules.toLocaleString() + " " + t.rulesActive : t.builtStat) +
+      " · " + (automatic ? t.autoRefresh : t.refreshPaused);
+    var details = [automatic ? t.autoRefresh : t.refreshPaused];
+    if (report && report.core && report.core.regex) details.push(report.core.regex.toLocaleString() + " " + t.regexRules);
+    if (report && report.core && report.core.regexRejected && report.core.regexRejected.length) {
+      details.push(report.core.regexRejected.length.toLocaleString() + " " + t.regexRejected);
+    }
+    if (report && report.siteCosmetics) {
+      if (report.siteCosmetics.procedural) details.push(report.siteCosmetics.procedural.toLocaleString() + " " + t.proceduralRules);
+      if (report.siteCosmetics.scriptlets) details.push(report.siteCosmetics.scriptlets.toLocaleString() + " " + t.scriptletRules);
+    }
+    if (currentFilterSettings.lastFilterRefresh) details.push(t.lastUpdate + ": " +
+      new Date(currentFilterSettings.lastFilterRefresh).toLocaleString(currentLang === "ar" ? "ar-SA" : "en-US"));
+    if (automatic && currentFilterSettings.lastFilterFailure) details.push(t.refreshFailed);
+    el.title = details.join("\n");
+  }
 
   function getBrowserLanguage() {
     var uiLang = "";
@@ -124,15 +165,7 @@
 
     renderUserRulesButton();
 
-    var filterStatEl = document.getElementById("filterStat");
-    if (filterStatEl) {
-      var numMatch = filterStatEl.textContent.match(/[\d,]+/);
-      if (numMatch) {
-        filterStatEl.textContent = numMatch[0] + " " + t.rulesActive;
-      } else {
-        filterStatEl.textContent = t.builtStat;
-      }
-    }
+    renderFilterStatus(currentFilterSettings);
 
     var input = document.getElementById("newDomainInput");
     if (input) {
@@ -260,11 +293,16 @@
       var update = {};
       update[settingKey] = this.checked;
       chrome.runtime.sendMessage({ type: "updateSettings", settings: update }, function (resp) {
+        if (resp && resp.success && resp.settings) renderFilterStatus(resp.settings);
+        if (resp && resp.success && ["adBlock", "useFilterLists", "strictTracking", "antiAdblock"].indexOf(settingKey) !== -1) {
+          chrome.runtime.sendMessage({ type: "getSettings" }, function (latest) { if (latest) renderFilterStatus(latest); });
+        }
         // MAIN-world script registration and broad blocker state only apply
         // cleanly to the current document after a reload. Other per-site
         // modules react live through chrome.storage.onChanged.
         if (resp && resp.success && currentTabId &&
-            (settingKey === "adBlock" || settingKey === "antiAdblock" || settingKey === "fbSponsored")) {
+            (settingKey === "adBlock" || settingKey === "antiAdblock" || settingKey === "fbSponsored" ||
+             (settingKey === "ytSkip" && /(^|\.)(youtube\.com|youtube-nocookie\.com)$/i.test(currentHostname)))) {
           chrome.tabs.reload(currentTabId);
         }
       });
@@ -352,11 +390,13 @@
         chrome.runtime.sendMessage({ type: "rebuildFilters" }, function (res) {
           rebuildBtn.disabled = false;
           rebuildBtn.textContent = TRANSLATIONS[currentLang].update;
-          var el = document.getElementById("filterStat");
-          if (res && res.ok) {
-            var countStr = res.report && Number.isFinite(res.report.rules) ? res.report.rules.toLocaleString() : "0";
-            el.textContent = countStr + " " + (TRANSLATIONS[currentLang].rulesActive || "active rules");
-          }
+          chrome.runtime.sendMessage({ type: "getSettings" }, function (settings) {
+            if (settings) renderFilterStatus(settings);
+            if (!res || !res.ok) {
+              var el = document.getElementById("filterStat");
+              if (el) el.textContent = TRANSLATIONS[currentLang].refreshFailed;
+            }
+          });
         });
       });
     }
@@ -396,15 +436,7 @@
         document.getElementById("todayCount").textContent = (settings.todayBlocked || 0).toLocaleString();
 
         // Dynamic filter report (do not advertise a fictional hard-coded total).
-        var filterStat = document.getElementById("filterStat");
-        if (filterStat) {
-          var report = settings.filterReport;
-          if (report && Number.isFinite(report.rules)) {
-            filterStat.textContent = report.rules.toLocaleString() + " " + TRANSLATIONS[currentLang].rulesActive;
-          } else {
-            filterStat.textContent = TRANSLATIONS[currentLang].builtStat;
-          }
-        }
+        renderFilterStatus(settings);
 
         // Whitelist rendering
         var wl = settings.whitelist || [];

@@ -50,7 +50,9 @@
   }
 
   function applyCosmeticFilters(settings, site) {
-    if (!settings.adBlock && !settings.antiAdblock) return;
+    var previous = document.getElementById("abp-builtin-cosmetic");
+    if (previous) previous.remove();
+    if (settings.adBlock === false || (!settings.adBlock && !settings.antiAdblock)) return;
     // Facebook's dedicated detector owns hiding, including embedded frames.
     if (/(^|\.)(facebook\.com|messenger\.com)$/i.test(window.location.hostname)) return;
     site = site || { hide: [], unhide: Object.create(null) };
@@ -634,10 +636,51 @@
   // (the settings plus this site's own hiding entries) in a single call,
   // instead of the whole store (filter reports, counters, other sites...).
   var siteKeys = siteCosmeticKeys(window.location.hostname);
-  var readKeys = ["adBlock", "antiAdblock", "mouseUnlock", "whitelist", "cosmeticCss"].concat(siteKeys);
+  var cosmeticSettings = null;
+  var advancedEngine = typeof PROCEDURAL_ENGINE !== "undefined" ? PROCEDURAL_ENGINE.create(document, { isUnsafeTarget: isTooLargeToBlock }) : null;
+  var scriptletInputs = "";
+  var hadScriptlets = false;
+  function applyAdvancedFilters(settings) {
+    if (!advancedEngine || typeof ADV_RULES === "undefined") return;
+    var host = window.location.hostname.toLowerCase();
+    var active = settings.adBlock !== false && settings.useFilterLists !== false &&
+      !ADV_RULES.excluded(host) && !isWhitelisted(host, settings.whitelist || []);
+    var collected = active ? ADV_RULES.collect(settings, host) : { procedural: [], scriptlets: [] };
+    advancedEngine.setRules(collected.procedural);
+    var key = JSON.stringify([active, settings.antiAdblock === true, settings.whitelist || [], collected.scriptlets.map(function (rule) { return rule.key; })]);
+    var wantedScriptlets = active && settings.antiAdblock === true && collected.scriptlets.length > 0;
+    if (key !== scriptletInputs && (wantedScriptlets || hadScriptlets) && chrome.runtime.sendMessage) {
+      hadScriptlets = wantedScriptlets;
+      // No rules/configuration are supplied by the page or this message.
+      // Background reads authoritative storage for this exact document.
+      chrome.runtime.sendMessage({ type: "syncEngineScriptlets" }, function () { void chrome.runtime.lastError; });
+    }
+    scriptletInputs = key;
+  }
+  document.addEventListener("DOMContentLoaded", function () {
+    if (cosmeticSettings) applyAdvancedFilters(cosmeticSettings);
+  }, { once: true });
+  window.addEventListener("pagehide", function (event) {
+    if (advancedEngine && !event.persisted) advancedEngine.stop();
+  });
+  window.addEventListener("pageshow", function (event) {
+    if (!event.persisted) return;
+    chrome.storage.local.get(readKeys, function (settings) {
+      cosmeticSettings = settings || {};
+      siteWhitelisted = isWhitelisted(window.location.hostname, cosmeticSettings.whitelist || []);
+      if (siteWhitelisted) {
+        var style = document.getElementById("abp-builtin-cosmetic");
+        if (style) style.remove();
+      } else applyCosmeticFilters(cosmeticSettings, collectSiteRules(cosmeticSettings, siteKeys));
+      applyAdvancedFilters(cosmeticSettings);
+    });
+  });
+  var readKeys = ["adBlock", "useFilterLists", "antiAdblock", "mouseUnlock", "whitelist", "cosmeticCss"].concat(siteKeys);
   if (userRuleKey) readKeys.push(userRuleKey);
   chrome.storage.local.get(readKeys, function (settings) {
     if (!settings) settings = {};
+    cosmeticSettings = settings;
+    applyAdvancedFilters(settings);
     var hostname = window.location.hostname;
     var wl = settings.whitelist || [];
     if (isWhitelisted(hostname, wl)) {
@@ -665,6 +708,29 @@
         document.addEventListener("DOMContentLoaded", defuseClickTraps);
       }
       setInterval(defuseClickTraps, 1500);
+    }
+  });
+
+  // Live list refreshes update only the current page's CSS inputs. Counters,
+  // core-network metadata, and other domains' entries do not trigger work.
+  chrome.storage.onChanged.addListener(function (changes, area) {
+    if (area !== "local" || !cosmeticSettings) return;
+    var relevant = false;
+    var keys = ["adBlock", "useFilterLists", "antiAdblock", "whitelist", "cosmeticCss"].concat(siteKeys);
+    for (var i = 0; i < keys.length; i++) {
+      if (Object.prototype.hasOwnProperty.call(changes, keys[i])) {
+        cosmeticSettings[keys[i]] = changes[keys[i]].newValue;
+        relevant = true;
+      }
+    }
+    if (!relevant) return;
+    applyAdvancedFilters(cosmeticSettings);
+    siteWhitelisted = isWhitelisted(window.location.hostname, cosmeticSettings.whitelist || []);
+    if (siteWhitelisted) {
+      var style = document.getElementById("abp-builtin-cosmetic");
+      if (style) style.remove();
+    } else {
+      applyCosmeticFilters(cosmeticSettings, collectSiteRules(cosmeticSettings, siteKeys));
     }
   });
 })();

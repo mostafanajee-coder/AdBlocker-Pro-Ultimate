@@ -22,7 +22,7 @@ async function run() {
     unregisterContentScripts: async ({ ids }) => ids.forEach(id => registrations.delete(id))
   } };
   const background = fs.readFileSync(path.join(root, "background.js"), "utf8");
-  const context = vm.createContext({ chrome, importScripts() {}, URL, Set, Map, Object, Array });
+  const context = vm.createContext({ chrome, FILTERS: {}, CORE_FILTERS: {}, importScripts() {}, URL, Set, Map, Object, Array });
   // Execute the real registration functions without booting the service worker.
   vm.runInContext(background.slice(0, background.indexOf("let rebuilding")), context);
   const settings = { adBlock: true, fbSponsored: true, ytSkip: false, antiAdblock: false, whitelist: ["facebook.com"] };
@@ -81,6 +81,7 @@ async function run() {
     const styles = [];
     const doc = {
       documentElement: { appendChild: element => styles.push(element.textContent) },
+      getElementById: () => null,
       addEventListener() {},
       createElement: () => ({ textContent: "", style: {} })
     };
@@ -88,7 +89,7 @@ async function run() {
       document: doc,
       window: { location: { hostname }, addEventListener() {} },
       chrome: {
-        storage: { local: { get: (_keys, cb) => cb({ adBlock: true, cosmeticCss: [".generic-ad"] }) } },
+        storage: { local: { get: (_keys, cb) => cb({ adBlock: true, cosmeticCss: [".generic-ad"] }) }, onChanged: { addListener() {} } },
         runtime: { onMessage: { addListener() {} } }
       }
     });
@@ -98,6 +99,41 @@ async function run() {
   check(runContent("www.messenger.com").length === 0, "Messenger receives no generic cosmetic stylesheet");
   check(runContent("www.youtube.com").some(css => css.includes(".generic-ad")), "Facebook exclusion leaves other platform cosmetics unchanged");
   check(runContent("news.example").some(css => css.includes(".generic-ad")), "ordinary sites retain generic cosmetic coverage");
+
+  const liveStyles = new Map();
+  let liveWrites = 0, onStorage;
+  vm.runInNewContext(content, {
+    document: {
+      documentElement: { appendChild: element => { liveWrites++; liveStyles.set(element.id, element); } },
+      getElementById: id => liveStyles.get(id),
+      addEventListener() {},
+      createDocumentFragment: () => ({ querySelector() {} }),
+      createElement: () => ({ textContent: "", style: {}, remove() { liveStyles.delete(this.id); } })
+    },
+    window: { location: { hostname: "news.example" }, addEventListener() {} },
+    chrome: {
+      storage: {
+        local: { get: (_keys, cb) => cb({ adBlock: true, cosmeticCss: [".old-ad"] }) },
+        onChanged: { addListener: handler => { onStorage = handler; } }
+      },
+      runtime: { onMessage: { addListener() {} } }
+    }
+  });
+  onStorage({ cosmeticCss: { newValue: [".new-ad"] } }, "local");
+  check(liveStyles.size === 1 && liveStyles.get("abp-builtin-cosmetic").textContent.includes(".new-ad") &&
+    !liveStyles.get("abp-builtin-cosmetic").textContent.includes(".old-ad"), "open pages replace cosmetic CSS immediately without duplicate styles");
+  onStorage({ "cf:news.example": { newValue: { h: [".site-ad"], u: [".new-ad"] } } }, "local");
+  check(liveStyles.get("abp-builtin-cosmetic").textContent.includes(".site-ad") &&
+    !liveStyles.get("abp-builtin-cosmetic").textContent.includes(".new-ad"), "live site updates honor the site's hiding exceptions");
+  const beforeUnrelated = liveWrites;
+  onStorage({ totalBlocked: { newValue: 9 }, "cf:other.example": { newValue: { h: [".other"] } } }, "local");
+  check(liveWrites === beforeUnrelated, "counter changes and other sites do not rebuild the page stylesheet");
+  onStorage({ whitelist: { newValue: ["news.example"] } }, "local");
+  check(!liveStyles.has("abp-builtin-cosmetic"), "live whitelist addition releases list hiding");
+  onStorage({ whitelist: { newValue: [] } }, "local");
+  check(liveStyles.has("abp-builtin-cosmetic"), "removing the whitelist restores current cosmetics");
+  onStorage({ adBlock: { newValue: false } }, "local");
+  check(!liveStyles.has("abp-builtin-cosmetic"), "global opt-out releases cosmetic hiding immediately");
 
   const originalFetch = global.fetch;
   const originalCap = FILTERS.MAX_FILTER_DOWNLOAD_BYTES;

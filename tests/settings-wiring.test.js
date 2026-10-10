@@ -34,7 +34,7 @@ check(background.includes('patch.strictTracking = true') && background.includes(
 const war = manifest.web_accessible_resources || [];
 check(war.length === 1 && Array.isArray(war[0].resources) && !war[0].resources.includes('web_accessible_resources/*'), 'web accessible resources are explicitly scoped instead of wildcarded');
 check(war[0].resources.length === 36, 'only the 36 redirect resources referenced by shipped rulesets are exposed');
-check(background.includes('filterLists: ["arabic", "easylist", "adguard-base"]'), 'default lists add AdGuard Base site hiding and still avoid duplicating bundled EasyPrivacy network rules');
+check(background.includes('"ublock-ads", "ublock-unbreak", "ublock-quick-fixes"'), 'default lists include uBlock cosmetic fixes alongside regional and general lists');
 check(background.includes('chrome.storage.local.get(SETTING_KEYS)') && !background.includes('storage.local.get(null)'), 'background reads settings keys only, never the ~20k site-hiding entries');
 check(!popup.includes('300,000+'), 'popup no longer advertises a fictional 300,000+ active-rule count');
 check(twitter.includes('twitterBlock') && twitter.includes('whitelist') && twitter.includes('adBlock'), 'Twitter module follows toggle, whitelist, and global blocker state');
@@ -54,7 +54,7 @@ check((manifest.permissions || []).includes('contextMenus'), 'right-click "Block
   check(re && re.test('mycima.example') && re.test('www.faselhd.tv') && !re.test('shahid.mbc.net'), 'click-trap removal targets pirate streaming hosts, not Shahid (MBC)');
 }
 check(!/innerHTML\s*=\s*["']<span>["']\s*\+\s*domain/.test(popup), 'the popup builds exception-list rows as text, never as HTML from the domain');
-check(manifest.minimum_chrome_version === '119', 'minimum Chrome version covers dynamic MAIN-world related-frame registration');
+check(manifest.minimum_chrome_version === '145', 'minimum Chrome version covers top-domain native regex rules');
 
 console.log('\n' + '='.repeat(64));
 console.log(`  Settings wiring: ${passed} passed, ${failed} failed`);

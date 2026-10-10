@@ -79,7 +79,7 @@ function startServiceWorker() {
     chrome, console, setTimeout, URL, Promise, Object, Array, Set, Map, Math, Date, JSON, Error,
     TextEncoder, crypto: require("crypto").webcrypto
   });
-  context.importScripts = (file) => vm.runInContext(fs.readFileSync(path.join(ROOT, file), "utf8"), context, { filename: file });
+  context.importScripts = (...files) => files.forEach(file => vm.runInContext(fs.readFileSync(path.join(ROOT, file), "utf8"), context, { filename: file }));
   context.self = context;
   vm.runInContext(BACKGROUND, context, { filename: "background.js" });
   return chrome;
