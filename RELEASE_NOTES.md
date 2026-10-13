@@ -1,3 +1,21 @@
+# Ad Blocker Pro Ultimate v5.5.2
+
+Facebook fixes found while testing the extension's code on a real Facebook home feed.
+
+## Facebook
+
+- Ads on Pages, groups or profile tabs whose address contains "reel" (for example a Page named "reelshort…") are hidden again. Only the real Reels viewer is treated as Reels.
+- Adding a site to the exception list, or saving a setting without changing it, no longer brings back hidden Facebook ads in open tabs.
+- Removed a routine that rewrote Facebook's SVG timestamps. Facebook no longer uses that markup, and the extension should not edit Facebook's own page.
+- The popup shows the correct version number.
+
+## Verification
+
+- All local regression suites pass, including three new Facebook sections; 9 of their checks fail on 5.5.1.
+- Live check on a real home feed: every ad that appeared was detected (3 of 3), no ordinary post was flagged in about 190 posts, and the feed never went blank. Facebook served no ads during the hide-mode session, so please report any ad that stays visible.
+
+---
+
 # Ad Blocker Pro Ultimate v5.5.1
 
 This release strengthens the general filter engine and fixes the regex rule that prevented Chrome from loading v5.5.0. It also includes the previously unpublished YouTube playback improvements.

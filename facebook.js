@@ -143,7 +143,7 @@
     }
 
     var n = el, best = null;
-    var isReel = (window.location && window.location.pathname.indexOf("/reel") !== -1) ||
+    var isReel = onReelViewer() ||
                  (el.closest && el.closest('[aria-label*="Reel" i], [aria-label*="ريلز" i], [data-pagelet*="Reel" i]'));
 
     var maxW = isReel ? 1800 : COLUMN_MAX;
@@ -576,8 +576,13 @@
     return slide;
   }
 
+  // The Reels viewer lives at /reel/<id> (and /reels/...). A substring test
+  // also matched pages such as /reelshortapp or a group named "reel...", where
+  // feed ads were then routed to the Reels viewer path and never hidden.
+  var REELS_ROUTE = /^\/reels?(\/|$)/;
+
   function onReelViewer() {
-    return !!(window.location && window.location.pathname.indexOf("/reel") !== -1);
+    return !!(window.location && REELS_ROUTE.test(window.location.pathname || ""));
   }
 
   /**
@@ -772,13 +777,23 @@
     el.removeAttribute("data-abp-debug");
   }
 
-  function releaseFacebookEffects() {
+  // keepWanted: give back only what the current settings no longer hide.
+  // Some ads are found by a one-time signal (the shadow-DOM label), so
+  // releasing everything on an unrelated change would leave them visible
+  // until the page is reloaded.
+  function releaseFacebookEffects(keepWanted) {
     var nodes = document.querySelectorAll("[data-abp-blocked], [data-abp-reel-hidden], [data-abp-debug]");
     for (var i = 0; i < nodes.length; i++) {
+      if (keepWanted) {
+        var reason = nodes[i].__abpHideReason || nodes[i].getAttribute("data-abp-blocked") ||
+                     nodes[i].getAttribute("data-abp-reel-hidden") || nodes[i].getAttribute("data-abp-debug");
+        if (hidingEnabled(reason)) continue;
+      }
       clearDebug(nodes[i]);
       if (nodes[i].__abpReelHidden) unhideReelInViewer(nodes[i], false);
       else if (nodes[i].hasAttribute("data-abp-blocked")) unhide(nodes[i], false);
     }
+    if (keepWanted) return; // kept cards still need their markers to be re-hidden
     var markers = document.querySelectorAll("[data-abp-ad-marker]");
     for (var m = 0; m < markers.length; m++) markers[m].removeAttribute("data-abp-ad-marker");
   }
@@ -1186,31 +1201,6 @@
     if (!local) svgCursor = i >= uses.length ? 0 : i;
   }
 
-  /**
-   * Facebook Comet 2026 Obfuscation Guard:
-   * Facebook often renders post timestamps into root SVG <text> elements with textLength="0" and y="-3",
-   * and referencing <svg> with height: 1px, causing timestamps to shrink into invisible 0-width dots.
-   * This restores normal visual dimensions for all organic timestamps (Arabic & English).
-   */
-  function restoreSvgTimestamps(root) {
-    var texts = elementsWithin(root, 'text[textLength="0"], text[y="-3"]');
-    for (var i = 0; i < texts.length; i++) {
-      var t = texts[i];
-      var raw = (t.textContent || "").trim();
-      if (!raw) continue;
-      var normTxt = D.norm(raw);
-      if (matchesAny(normTxt, SPONSORED)) continue;
-
-      t.removeAttribute("textLength");
-      t.setAttribute("y", "12");
-    }
-
-    var svgs = elementsWithin(root, 'a svg[style*="height: 1px"]');
-    for (var s = 0; s < svgs.length; s++) {
-      svgs[s].style.setProperty("height", "14px", "important");
-    }
-  }
-
   function sweepLabels(root) {
     if (!S.adBlock) return;
     if (!S.fbSponsored && !S.fbSuggested) return;
@@ -1234,7 +1224,7 @@
       // Header Band Constraint for Feed Cards:
       // On Facebook Feed, the genuine disclosure chip ("مُموَّل" / "Sponsored") sits within the author/metadata header band.
       // 240px allows full coverage for 2-line Arabic titles, badges, and margins without hitting the post body.
-      var isReel = (window.location && window.location.pathname.indexOf("/reel") !== -1) ||
+      var isReel = onReelViewer() ||
                    (container.closest && container.closest('[aria-label*="Reel" i], [aria-label*="ريلز" i], [data-pagelet*="Reel" i]'));
 
       if (!isReel) {
@@ -1271,7 +1261,6 @@
     try { sweepDirectAdLinks(card); } catch (_) {}
     try { sweepAriaLabelledAds(card); } catch (_) {}
     try { sweepSvgAds(card); } catch (_) {}
-    try { restoreSvgTimestamps(card); } catch (_) {}
     try { sweepLabels(card); } catch (_) {}
     try { sweepReels(card); } catch (_) {}
     try { sweepReelAds(card); } catch (_) {}
@@ -1461,7 +1450,7 @@
     var local = !!root;
     var scope = root || document;
     var reelHints = 'div[aria-label*="Reel" i], div[aria-label*="ريلز" i], div[data-pagelet*="Reel" i], a[href*="/reel/"]';
-    var isReelsPage = (window.location && window.location.pathname.indexOf("/reel") !== -1) ||
+    var isReelsPage = onReelViewer() ||
                       Boolean(elementsWithin(scope, reelHints).length);
     if (!isReelsPage) return;
 
@@ -1527,7 +1516,6 @@
       try { sweepDirectAdLinks(); } catch (_) {}
       try { sweepAriaLabelledAds(); } catch (_) {}
       try { sweepSvgAds(); } catch (_) {}
-      try { restoreSvgTimestamps(); } catch (_) {}
       try { sweepLabels(); } catch (_) {}
       try { sweepReels(); } catch (_) {}
       try { sweepReelAds(); } catch (_) {}
@@ -1681,7 +1669,7 @@
       childList: true,
       subtree: true,
       attributes: true,
-      attributeFilter: ['aria-label', 'aria-labelledby', 'href', 'xlink:href', 'id', 'title', 'style', 'class', 'role', 'data-pagelet', 'data-testid', 'textLength', 'y'],
+      attributeFilter: ['aria-label', 'aria-labelledby', 'href', 'xlink:href', 'id', 'title', 'style', 'class', 'role', 'data-pagelet', 'data-testid'],
       characterData: true
     });
 
@@ -1838,17 +1826,29 @@
     // anywhere — a self-feeding loop, since our own hides write those keys.
     chrome.storage.onChanged.addListener(function (changes, area) {
       if (area && area !== "local") return;
+      // Only a real change to this page's state counts: the popup can write a
+      // setting with its current value, and adding another site to the
+      // exception list does not concern Facebook at all.
       var relevant = false;
+      var debugChanged = false;
       for (var k in changes) {
-        if (k in S) { S[k] = changes[k].newValue; relevant = true; }
-        else if (k === "whitelist") {
-          siteWhitelisted = isWhitelisted(window.location.hostname, changes[k].newValue || []);
+        if (k in S) {
+          if (S[k] === changes[k].newValue) continue;
+          if (k === "fbDebug") debugChanged = true;
+          S[k] = changes[k].newValue;
+          relevant = true;
+        } else if (k === "whitelist") {
+          var nowWhitelisted = isWhitelisted(window.location.hostname, changes[k].newValue || []);
+          if (nowWhitelisted === siteWhitelisted) continue;
+          siteWhitelisted = nowWhitelisted;
           relevant = true;
         }
       }
       if (!relevant) return;
       stopFacebookProbeIfDisabled();
-      releaseFacebookEffects();
+      // Switching diagnostic mode changes how every effect looks (outline vs
+      // hide), so that one replaces them all.
+      releaseFacebookEffects(!debugChanged);
       seen = new WeakSet();
       if (!started && !siteWhitelisted) {
         if (document.body) start();

@@ -1,6 +1,14 @@
-# Ad Blocker Pro Ultimate — v5.5.1 Load-Safety Fix
+# Ad Blocker Pro Ultimate — Maintenance Notes (v5.5.2)
 
 This build maintains the existing regional filter pipeline and platform lifecycles while making core network data refreshable. The original pipeline studied engineering ideas from `217heidai/adblockfilters`; that project's implementation is not vendored. Official uBOL declarative filter data is included separately with its upstream license and pinned provenance.
+
+## 5.5.2 Facebook fixes
+
+- Reels routing uses `^/reels?(/|$)` instead of a `/reel` substring. Feed pages such as `/reelshortapp`, `/groups/reelfans/` or `/<profile>/reels/` are ordinary feeds again, so image ads there are hidden instead of being sent to the viewer path (which requires exactly one video).
+- Storage changes count only when a Facebook setting actually changes value or the page's own whitelist state flips. Effects are then released only if the new settings no longer enable their reason; switching diagnostic mode still replaces every effect. Shadow-only ads (one-time signal) therefore survive unrelated changes.
+- Removed `restoreSvgTimestamps` and the `textLength`/`y` observer attributes. A live check on 2026-10-13 found no SVG `<text>` or `<use>` elements on the Facebook home feed; the function only rewrote Facebook markup. `sweepSvgAds` stays as a read-only detector.
+- Live check on the real home feed (2026-10-13, extension code injected and hash-verified): 3 of 3 ads flagged (all via the `aria-labelledby` "Ad" label), no organic post flagged across about 190 posts, and the feed never went blank in hide mode. No ads were served in the hide-mode session, so a live hide of a real ad was not observed. Facebook's graphql traffic mostly bypassed `XMLHttpRequest.prototype.send` in that session, so the probe's network early-warning likely rarely fires; DOM detection does not depend on it.
+- Regression sections 37-39 in `tests/facebook-orchestration.test.js`; 9 of their checks fail on 5.5.1.
 
 ## 5.5.1 regex load regression
 
@@ -46,7 +54,7 @@ This build maintains the existing regional filter pipeline and platform lifecycl
 
 ## Facebook lifecycle changes
 
-- Central hiding guards honor the global switch, Facebook options, and live whitelist changes, including direct shadow events and known markers. Existing effects are released before re-evaluating changed settings.
+- Central hiding guards honor the global switch, Facebook options, and live whitelist changes, including direct shadow events and known markers. Effects the changed settings no longer enable are released before re-evaluation; unrelated or unchanged settings keep current hides.
 - Diagnostic mode only outlines detections, preserves original outlines, and does not mute, hide, navigate, or count blocked content.
 - Reel navigation confirms route, creative, or active-slide movement. A no-op is recorded explicitly; only one replacement control can receive a second attempt. Generic keys and scroll fallbacks remain disabled.
 - The MAIN-world probe is dynamically registered with whitelist exclusions and global/Facebook settings. Disabling it tears down owned hooks and observers in the open document. Registration changes take effect on future documents; enabling it again requires refreshing open tabs.

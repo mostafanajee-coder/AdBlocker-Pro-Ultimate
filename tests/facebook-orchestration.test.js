@@ -1617,6 +1617,90 @@ section("36. Reel advancement confirms transitions and bounds no-op retries", ()
   check("a confirmed transition never advances twice", replacement.__clicks, 1);
 });
 
+section("37. Only the Reels viewer route is treated as Reels", () => {
+  // Pages whose address merely contains "/reel" are ordinary feeds: an image
+  // ad there has no video, so the Reels path could never hide it.
+  for (const path of ["/reelshortapp", "/groups/reelfans/", "/someone/reels/"]) {
+    const h = createHarness();
+    h.window.location.pathname = path;
+    const ad = card(h);
+    ad.appendChild(h.doc.createElement("span").append(text(h, "Sponsored")));
+    h.main.appendChild(ad);
+    h.mutate({ type: "childList", target: h.main, addedNodes: [ad] });
+    check(path + ": an image ad is hidden like any feed ad", isBlocked(ad), true);
+    check(path + ": it is not handled as a covered reel", ad.hasAttribute("data-abp-reel-hidden"), false);
+  }
+  for (const path of ["/reel/123", "/reels/", "/reels"]) {
+    const h = createHarness();
+    h.window.location.pathname = path;
+    const { adReel } = reelViewerAd(h);
+    h.scheduler.tickInterval(0);
+    h.scheduler.flush();
+    check(path + ": the viewer still covers a reel ad", adReel.hasAttribute("data-abp-reel-hidden"), true);
+  }
+});
+
+section("38. Settings changes keep hides that are still wanted", () => {
+  const h = createHarness();
+  const ad = card(h);
+  const host = h.doc.createElement("span"); // its "Ad" text lives in a closed shadow root
+  ad.appendChild(host);
+  h.main.appendChild(ad);
+  h.doc.dispatch("__abpShadowSponsoredDetected", host);
+  h.scheduler.flush();
+  check("a shadow-only ad is hidden", isBlocked(ad), true);
+
+  h.changeSettings({ whitelist: ["example.com"] });
+  check("adding another site to the exception list keeps it hidden", isBlocked(ad), true);
+  h.changeSettings({ fbSponsored: true, adBlock: true });
+  check("re-saving the current values keeps it hidden", isBlocked(ad), true);
+  h.changeSettings({ fbSuggested: true });
+  check("enabling another Facebook option keeps it hidden", isBlocked(ad), true);
+  h.changeSettings({ fbSponsored: false });
+  check("turning sponsored hiding off still gives it back", isBlocked(ad), false);
+
+  const suggested = createHarness({ settings: { fbSuggested: true } });
+  const post = card(suggested);
+  post.appendChild(suggested.doc.createElement("span").append(text(suggested, "Suggested for you")));
+  suggested.main.appendChild(post);
+  suggested.mutate({ type: "childList", target: suggested.main, addedNodes: [post] });
+  check("a suggested post is hidden while the option is on", isBlocked(post), true);
+  suggested.changeSettings({ fbSuggested: false });
+  check("turning the suggested option off gives it back", isBlocked(post), false);
+
+  const debug = createHarness({ settings: { fbDebug: true } });
+  const outlined = card(debug);
+  outlined.appendChild(debug.doc.createElement("span").append(text(debug, "Sponsored")));
+  debug.main.appendChild(outlined);
+  debug.mutate({ type: "childList", target: debug.main, addedNodes: [outlined] });
+  check("diagnostic mode outlines the ad", outlined.hasAttribute("data-abp-debug"), true);
+  debug.changeSettings({ fbDebug: false });
+  check("leaving diagnostic mode removes the outline", outlined.hasAttribute("data-abp-debug"), false);
+  check("leaving diagnostic mode hides the ad instead", isBlocked(outlined), true);
+});
+
+section("39. Facebook's own SVG text is never rewritten", () => {
+  const h = createHarness();
+  const post = card(h);
+  const svgText = h.doc.createElement("text");
+  svgText.setAttribute("textLength", "0");
+  svgText.setAttribute("y", "-3");
+  svgText.appendChild(text(h, "3h"));
+  const link = h.doc.createElement("a");
+  const icon = h.doc.createElement("svg");
+  icon.style.setProperty("height", "1px");
+  link.appendChild(icon);
+  post.append(h.doc.createElement("svg").append(svgText), link);
+  h.main.appendChild(post);
+  h.mutate({ type: "childList", target: h.main, addedNodes: [post] });
+  h.scheduler.tickInterval(0);
+  h.scheduler.flush();
+  check("textLength is left as Facebook set it", svgText.getAttribute("textLength"), "0");
+  check("y is left as Facebook set it", svgText.getAttribute("y"), "-3");
+  check("the icon height is left as Facebook set it", icon.style.getPropertyValue("height"), "1px");
+  check("an organic post is not hidden", isBlocked(post), false);
+});
+
 console.log(`\n${"=".repeat(64)}`);
 console.log(`  ${passed} passed, ${failed} failed`);
 console.log(`${"=".repeat(64)}`);

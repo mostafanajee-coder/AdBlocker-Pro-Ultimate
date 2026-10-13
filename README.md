@@ -1,4 +1,4 @@
-# 🛡️ Ad Blocker Pro Ultimate (v5.5.1)
+# 🛡️ Ad Blocker Pro Ultimate (v5.5.2)
 
 [![Manifest V3](https://img.shields.io/badge/Chrome-Manifest%20V3-blue.svg)](https://developer.chrome.com/docs/extensions/mv3/intro/)
 [![Tests](https://img.shields.io/badge/Tests-local%20regressions-brightgreen.svg)](tests/)
@@ -7,6 +7,10 @@
 A Manifest V3 ad blocker for Chromium browsers, with declarative network filtering, dedicated sponsored-content detectors, YouTube response sanitizing, optional anti-adblock hooks, and popunder suppression. Local regression checks verify the behaviors described below; they do not guarantee compatibility with every live site update.
 
 ---
+
+## 🔧 v5.5.2 Facebook Fixes
+
+Only the Reels viewer (`/reel/...`, `/reels/...`) is handled as Reels. Pages whose address merely contained `/reel` (a Page or group named "reel…", a profile's Reels tab) were routed to the viewer logic, so their image ads were never hidden. Changing a setting now releases only effects the new settings no longer want: adding another site to the exception list or re-saving current values no longer brings back hidden Facebook ads, including ones found only by the one-time Shadow DOM signal. The SVG timestamp rewrite was removed; today's Facebook page has no SVG text for it to act on, and it edited Facebook's own markup.
 
 ## 🔧 v5.5.1 Load-Safety Fix
 
@@ -30,7 +34,7 @@ YouTube's bounded ad-recovery checks now use timers instead of animation frames,
 
 These are local regression-tested behaviors. Live YouTube playback and ad coverage must still be checked after reloading the extension; browser autoplay, tab freezing/discarding, and changes to YouTube's player can affect runtime behavior.
 
-Facebook settings now guard direct Shadow DOM signals and release existing hide/cover effects when protection is disabled or the site is whitelisted. The MAIN-world probe is dynamically registered with the same exclusions; live opt-out restores its owned page hooks and disconnects its observers. Enabling the probe again requires a page reload. The popup reloads the active tab after changing the Facebook/global toggle or its current-site whitelist.
+Facebook settings now guard direct Shadow DOM signals and release existing hide/cover effects when protection is disabled or the site is whitelisted; unrelated or unchanged settings leave current hides in place. The MAIN-world probe is dynamically registered with the same exclusions; live opt-out restores its owned page hooks and disconnects its observers. Enabling the probe again requires a page reload. The popup reloads the active tab after changing the Facebook/global toggle or its current-site whitelist.
 
 Reel advancement is confirmed from route, creative, or active-slide movement after clicking the explicit Next Card control. An ignored click is recorded as unconfirmed. At most one replacement control can receive a recovery attempt; the same ignored control is never clicked repeatedly. Confirmed ads stay covered and muted during transition, without collapsing the active slide or sending generic navigation keys.
 
@@ -44,7 +48,7 @@ The regional text pipeline keeps conservative ABP/AdGuard-to-DNR conversion, raw
 
 ## ⚡ Key Highlights & Architecture
 
-| Feature | Legacy MV2 Blockers | Ad Blocker Pro Ultimate (v5.5.1) |
+| Feature | Legacy MV2 Blockers | Ad Blocker Pro Ultimate (v5.5.2) |
 | :--- | :--- | :--- |
 | **Manifest Compatibility** | Deprecated / Disabled in Chrome 120+ | **Native Manifest V3 Compliance** |
 | **Network Filtering** | Blocking webRequest engine | **18,723 safe main fallback rules + runtime-validated regex; 48-hour core/regional refresh within a 29,000-rule budget** |
