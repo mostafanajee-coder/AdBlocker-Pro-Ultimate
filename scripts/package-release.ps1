@@ -37,7 +37,7 @@ if ($version -notmatch '^\d+\.\d+\.\d+$' -or $package.version -ne $version) { th
 $paths = @(
   'manifest.json','background.js','content.js','facebook.js','fb-detect.js','fb-net-probe.js',
   'filters.js','core-filters.js','advanced-rules.js','procedural-engine.js','scriptlet-engine.js',
-  'youtube.js','youtube-main.js','youtube-sanitizer.js','instagram.js','twitter.js','inject.js','popclose.js',
+  'youtube.js','youtube-main.js','youtube-sanitizer.js','instagram.js','twitter.js','twitter-main.js','inject.js','popclose.js',
   'popup.html','popup.js','LICENSE','README.md','MAINTENANCE_NOTES.md','RELEASE_NOTES.md',
   'rulesets/core-source.json','rulesets/SOURCES.md','rulesets/UPSTREAM_LICENSE.txt'
 )

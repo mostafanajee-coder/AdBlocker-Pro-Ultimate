@@ -1,3 +1,42 @@
+# Ad Blocker Pro Ultimate v5.5.5
+
+Cross-browser Firefox & Chrome support from the same project folder, a multi-layer Twitter / X promoted content overhaul, and Instagram Reels disclosure improvements.
+
+## Firefox & Chrome Compatibility
+
+- Supports both **Google Chrome** (`background.service_worker`) and **Mozilla Firefox 128+** (`background.scripts` + `browser_specific_settings.gecko`) directly from the same folder and package.
+- Adapts dynamic DNR updates to Firefox's 5,000 dynamic rule limit by keeping all 18,763 bundled static rules active in Firefox while installing regional (`Liste AR`) and compatible regex rules dynamically, without affecting Chrome's 30,000 dynamic rule pipeline.
+
+## Twitter / X Promoted Content Slayer
+
+- **MAIN-World GraphQL & React Fiber Interceptor (`twitter-main.js`)**: Strips promoted tweets, promoted conversation replies, and promoted suggestions from X's `/i/api/graphql/` responses while preserving timeline cursors, and tags React Fiber nodes carrying `promotedMetadata` / `adMetadataContainer`.
+- **Resilient DOM & Virtual Scroller Engine (`twitter.js`)**: Replaces one-shot `abpChecked` caching on unblocked tweets so delayed badge hydration and recycled virtual-list cells are always caught; injects a persistent `#abp-twitter-cosmetic` stylesheet so React inline style updates during scrolling cannot uncollapse hidden ad cells; automatically restores cells recycled for organic tweets.
+- **Expanded Badge & Icon Coverage**: Normalizes Arabic diacritics/tashkeel (`مُروَّج`) and separator dots (`· Ad`, `· إعلان`), matches `Promoted by <Advertiser>` / `مُروّج بواسطة <Advertiser>` disclosures, scans `div[dir="ltr"]` and `div[dir="rtl"]` badge containers, and detects X's official Promoted SVG icon paths.
+
+## Instagram Reels
+
+- Recognizes standalone `Ad` disclosures below the author row and `Navigate to next Reel` controls for foreground confirmed ads while protecting organic captions and manual playback.
+
+---
+
+# v5.5.4 — local work, not published
+
+- Match Instagram's observed standalone `Ad` disclosure below the author row, while keeping caption text protected.
+- Recognize the observed native `Navigate to next Reel` label and allow one foreground-confirmed attempt.
+- Add focused regressions; reload the unpacked extension and refresh Instagram for live verification. No push or release was authorized.
+
+---
+
+# v5.5.3 — local work, not published
+
+- Improve Instagram Reel/container discovery, delayed-label observation, caption/profile protection, and reversible media/DOM effects.
+- Preserve viewer layout and manual playback; do not pause/resume media or use generic/synthetic Reel navigation.
+- Exact foreground Next reel controls receive at most one attempt; absent controls leave the confirmed ad covered/muted until normal navigation.
+- Initial settings and live opt-outs are honored. Add targeted regression tests and a browser fixture. Real-site verification remains pending; browser control stopped on URL-policy uncertainty.
+- No commit, push or release was authorized for this local change.
+
+---
+
 # Ad Blocker Pro Ultimate v5.5.2
 
 Facebook fixes found while testing the extension's code on a real Facebook home feed.

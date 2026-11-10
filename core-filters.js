@@ -119,7 +119,13 @@ const CORE_FILTERS = {
     const manifest = chrome.runtime.getManifest();
     const resources = manifest.web_accessible_resources.flatMap(entry => entry.resources);
     const sources = this.SOURCES.filter(source => this.enabled(source, settings));
-    const jobs = sources.flatMap(source => [{ source, kind: "main" }].concat(source.regex ? [{ source, kind: "regex" }] : []));
+    // Firefox caps dynamic DNR at 5,000 rules while keeping all 18,763 bundled
+    // static rules active in its 30,000 static quota. When the dynamic ceiling
+    // cannot hold the 18,723 main core rules, keep static main rulesets enabled
+    // and only dynamically install supported regex partitions.
+    const nativeMaxDynamic = Number(chrome.declarativeNetRequest && chrome.declarativeNetRequest.MAX_NUMBER_OF_DYNAMIC_RULES);
+    const keepStaticMain = Number.isInteger(nativeMaxDynamic) && nativeMaxDynamic > 0 && nativeMaxDynamic < 20000;
+    const jobs = sources.flatMap(source => (keepStaticMain ? [] : [{ source, kind: "main" }]).concat(source.regex ? [{ source, kind: "regex" }] : []));
     const results = await engine.boundedJobs(jobs, async ({ source, kind }) => {
       const url = this.RAW_ROOT + descriptor.sha + "/chromium/rulesets/" + kind + "/" + source.id + ".json";
       const upstreamRules = JSON.parse(await engine.fetchText(url));
@@ -128,6 +134,10 @@ const CORE_FILTERS = {
       if (kind === "regex") {
         if (typeof chrome.declarativeNetRequest.isRegexSupported !== "function") throw new Error("native regex validation unavailable");
         for (const [index, rule] of candidates.entries()) {
+          if (keepStaticMain && ["responseHeaders", "excludedResponseHeaders", "topDomains", "excludedTopDomains"].some(k => rule.condition[k] !== undefined)) {
+            rejected.push({ source: source.id, id: upstreamRules[index].id, reason: "unsupported condition in Firefox DNR" });
+            continue;
+          }
           const supported = await chrome.declarativeNetRequest.isRegexSupported({ regex: rule.condition.regexFilter,
             isCaseSensitive: rule.condition.isUrlFilterCaseSensitive === true,
             requireCapturing: rule.action.type === "redirect" && rule.action.redirect.regexSubstitution !== undefined });
@@ -140,7 +150,9 @@ const CORE_FILTERS = {
       return { id: source.id, kind, rules, rejected, candidates: candidates.length };
     });
     const counts = {};
-    for (const result of results) counts[result.id] = (counts[result.id] || 0) + result.rules.length;
+    if (!keepStaticMain) {
+      for (const result of results) counts[result.id] = (counts[result.id] || 0) + result.rules.length;
+    }
     return {
       revision: descriptor.sha,
       counts,

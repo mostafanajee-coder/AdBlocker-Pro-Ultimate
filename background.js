@@ -1,4 +1,4 @@
-importScripts("advanced-rules.js", "filters.js", "core-filters.js");
+if (typeof importScripts === "function") importScripts("advanced-rules.js", "filters.js", "core-filters.js");
 FILTERS.core = CORE_FILTERS;
 
 const DEFAULTS = {
@@ -185,6 +185,19 @@ async function syncRegisteredScripts(settings) {
       world: "MAIN",
       allFrames: true,
       matchOriginAsFallback: true
+    }
+  );
+
+  await replaceRegisteredScript(
+    "twitter-main-script",
+    settings.adBlock !== false && settings.twitterBlock !== false,
+    {
+      matches: ["*://*.twitter.com/*", "*://*.x.com/*"],
+      excludeMatches,
+      js: ["twitter-main.js"],
+      runAt: "document_start",
+      world: "MAIN",
+      allFrames: false
     }
   );
 }
@@ -543,7 +556,7 @@ async function applySettingsPatch(patch) {
   const settings = mergedSettings(await readSettings());
   if (typeof CORE_FILTERS.prune === "function") await CORE_FILTERS.prune(settings);
 
-  const runtimeKeys = ["adBlock", "strictTracking", "antiAdblock", "ytSkip", "fbSponsored", "whitelist"];
+  const runtimeKeys = ["adBlock", "strictTracking", "antiAdblock", "ytSkip", "fbSponsored", "twitterBlock", "whitelist"];
   if (runtimeKeys.some((key) => Object.prototype.hasOwnProperty.call(patch, key))) {
     await syncRuntimeState(settings);
   }

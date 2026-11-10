@@ -302,7 +302,8 @@
         // modules react live through chrome.storage.onChanged.
         if (resp && resp.success && currentTabId &&
             (settingKey === "adBlock" || settingKey === "antiAdblock" || settingKey === "fbSponsored" ||
-             (settingKey === "ytSkip" && /(^|\.)(youtube\.com|youtube-nocookie\.com)$/i.test(currentHostname)))) {
+             (settingKey === "ytSkip" && /(^|\.)(youtube\.com|youtube-nocookie\.com)$/i.test(currentHostname)) ||
+             (settingKey === "twitterBlock" && /(^|\.)(twitter\.com|x\.com)$/i.test(currentHostname)))) {
           chrome.tabs.reload(currentTabId);
         }
       });

@@ -1,6 +1,28 @@
-# Ad Blocker Pro Ultimate — Maintenance Notes (v5.5.2)
+# Ad Blocker Pro Ultimate — Maintenance Notes (v5.5.5)
 
 This build maintains the existing regional filter pipeline and platform lifecycles while making core network data refreshable. The original pipeline studied engineering ideas from `217heidai/adblockfilters`; that project's implementation is not vendored. Official uBOL declarative filter data is included separately with its upstream license and pinned provenance.
+
+## 5.5.5 Firefox compatibility & Twitter / X overhaul
+
+- Dual-browser Manifest V3 (`manifest.json`, `background.js`): include `background.scripts` alongside `background.service_worker` and `browser_specific_settings.gecko` (`strict_min_version: "128.0"`). Guard `importScripts` so Firefox event pages and Chrome service workers execute from the same folder without conflict.
+- Firefox DNR quota adaptation (`core-filters.js`, `filters.js`): when `MAX_NUMBER_OF_DYNAMIC_RULES < 20000` (5,000 in Firefox), retain the 18,763 bundled static rulesets in Firefox's 30,000 static quota and use the dynamic quota for supported regex rules (excluding Chrome-only `responseHeaders`/`topDomains` dynamic rule conditions) and regional rules (`Liste AR`).
+- Twitter / X multi-layer ad removal (`twitter-main.js`, `twitter.js`): dynamically register `twitter-main.js` in `MAIN` world to sanitize promoted timeline/reply entries from `/i/api/graphql/` responses (preserving pagination cursors) and tag React Fiber promoted nodes (`promotedMetadata`, `adMetadataContainer`). In `twitter.js`, remove premature `abpChecked` skipping on unblocked articles, inject a persistent `#abp-twitter-cosmetic` stylesheet so virtual scroller style rewrites cannot uncollapse hidden cells, uncollapse cells when recycled for organic tweets, normalize Arabic tashkeel/diacritics and leading/trailing separator dots, match `Promoted by ...` / `مُروّج بواسطة ...` disclosures, inspect `div[dir="ltr"|"rtl"]` badges, and match official X Promoted SVG icon paths.
+
+## 5.5.4 Instagram live-case correction
+
+- Chrome inspection confirmed a live Reel with the standalone `Ad` disclosure below its author line, while the Instagram toggle and global blocker were enabled. The earlier proximity rule rejected this layout.
+- Recognize exact standalone `Ad` only when near the Reel's own profile link and outside caption/comment regions; also inspect bounded div/role-button text candidates so non-span labels are discoverable.
+- Accept the observed native control name `Navigate to next Reel`, still only once after hit-testing the foreground confirmed ad. No generic Next or synthetic navigation is used.
+- Add regression tests for the observed lower disclosure, organic caption text, and exact native control. Verify live after reloading this local build and refreshing Instagram; no publication is included.
+
+## 5.5.3 Instagram Reels — local only
+
+- Expand discovery beyond `article`, but never mark multi-video/global structural wrappers. Disclosure matching is metadata-scoped; caption/comment text, profile links and spoofed/external ad URLs are not sufficient evidence.
+- Separate feed collapse from viewer cover. Keep the Reel's original nodes and dimensions; mute only owned media changes, never call `pause()` or `play()`, and restore on organic recycling/opt-out without overriding trusted audio controls.
+- Observe character-data/disclosure attributes, repair owned styles/markers, batch mutation work and keep scans bounded. Wait for settings before acting, honor current whitelist/global/Instagram switches and ignore stale storage callbacks.
+- One exact visible Next reel control is allowed only for the hit-tested foreground ad. No generic Next, synthetic key or scroll fallback; no retry of an ignored control. The fallback remains a covered/muted ad until native/manual navigation, not a claim of invisible skipping in every viewer layout.
+- Add `tests/instagram-reels.test.js` and a separate real-DOM fixture. Browser-control verification was stopped because the tool could not establish Chrome's URL confidently enough for policy enforcement; no alternate browser-control mechanism was used. Real Instagram/Reels load and ad coverage are not confirmed.
+- User approved local repair/testing only. No commit/push/publication is part of this change.
 
 ## 5.5.2 Facebook fixes
 

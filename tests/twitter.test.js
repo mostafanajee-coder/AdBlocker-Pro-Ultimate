@@ -3,6 +3,7 @@
 const fs = require("fs");
 const path = require("path");
 const twitter = require("../twitter.js");
+const twitterMain = require("../twitter-main.js");
 
 let passed = 0;
 let failed = 0;
@@ -140,6 +141,73 @@ const mockOrganicNewsTweet = {
   }
 };
 check(!twitter.isPromotedTweet(mockOrganicNewsTweet), "rejects organic news tweet with 'إعلان رسمي' in body");
+
+// 10. Enhanced Arabic diacritics, separator dots, and "Promoted by <Advertiser>" disclosures
+check(twitter.isExactPromotedLabel("مُروَّج"), "matches Arabic 'مُروَّج' with full tashkeel");
+check(twitter.isExactPromotedLabel("· Ad"), "matches '· Ad' with leading separator dot");
+check(twitter.isExactPromotedLabel("· إعلان"), "matches '· إعلان' with leading separator dot");
+check(twitter.isPromotedByLabel("Promoted by Acme Corp"), "matches 'Promoted by <Advertiser>' disclosure");
+check(twitter.isPromotedByLabel("مُروّج بواسطة شركة أكمي"), "matches Arabic 'مُروّج بواسطة <Advertiser>' disclosure");
+check(!twitter.isPromotedByLabel("I got promoted by my manager"), "rejects organic sentence 'I got promoted by my manager'");
+
+// 11. Official Promoted SVG icon path and MAIN-world fiber marker
+const mockSvgAdTweet = {
+  getAttribute: () => null,
+  querySelector: () => null,
+  querySelectorAll: (selector) => {
+    if (selector === 'svg') {
+      return [{
+        closest: () => null,
+        querySelector: () => null,
+        getAttribute: () => null,
+        querySelectorAll: () => [{ getAttribute: () => 'M19.498 3h-15c-1.381 0-2.5 1.12-2.5 2.5v13' }]
+      }];
+    }
+    return [];
+  }
+};
+check(twitter.isPromotedTweet(mockSvgAdTweet), "detects promoted tweet via official X Promoted SVG icon path");
+
+const mockFiberMarkedTweet = {
+  getAttribute: (attr) => (attr === 'data-abp-x-promoted' ? 'true' : null),
+  querySelector: () => null,
+  querySelectorAll: () => []
+};
+check(twitter.isPromotedTweet(mockFiberMarkedTweet), "detects promoted tweet tagged by MAIN-world React Fiber probe");
+
+// 12. MAIN-world GraphQL payload sanitization (HomeTimeline & TweetDetail replies)
+const mockGraphqlPayload = {
+  data: {
+    home: {
+      home_timeline_urt: {
+        instructions: [
+          {
+            type: "TimelineAddEntries",
+            entries: [
+              { entryId: "tweet-100", content: { itemContent: { tweet_results: { result: { rest_id: "100" } } } } },
+              { entryId: "promoted-tweet-200", content: { itemContent: { promotedMetadata: { advertiser_name: "AdCo" } } } },
+              {
+                entryId: "conversationthread-300",
+                content: {
+                  items: [
+                    { entryId: "tweet-301", item: { itemContent: { tweet_results: { result: { rest_id: "301" } } } } },
+                    { entryId: "promoted-tweet-302", item: { itemContent: { promotedMetadata: { impressionId: "abc" } } } }
+                  ]
+                }
+              },
+              { entryId: "cursor-bottom-999", content: { entryType: "TimelineTimelineCursor", value: "next_cursor" } }
+            ]
+          }
+        ]
+      }
+    }
+  }
+};
+const removedCount = twitterMain.sanitizeTwitterPayload(mockGraphqlPayload);
+const remainingEntries = mockGraphqlPayload.data.home.home_timeline_urt.instructions[0].entries;
+check(removedCount === 2, "MAIN-world GraphQL sanitizer removes both top-level promoted tweets and nested promoted reply items");
+check(remainingEntries.length === 3 && remainingEntries.some(e => e.entryId === "cursor-bottom-999"), "GraphQL sanitizer preserves organic tweets and pagination cursors");
+check(remainingEntries[1].content.items.length === 1 && remainingEntries[1].content.items[0].entryId === "tweet-301", "GraphQL sanitizer preserves organic replies inside conversation modules");
 
 console.log("\n" + "=".repeat(64));
 console.log(`  Twitter / X: ${passed} passed, ${failed} failed`);

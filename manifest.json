@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "AdBlocker Pro Ultimate",
-  "version": "5.5.2",
+  "version": "5.5.5",
   "description": "Block annoying ads on YouTube and Facebook cleanly. Core community filter lists, Facebook & Instagram detection, YouTube instant-start, Twitter/X promoted tweet slayer, Popunder neutralizer, and safe anti-adblock evasion.",
   "permissions": [
     "declarativeNetRequest",
@@ -17,7 +17,19 @@
     "<all_urls>"
   ],
   "background": {
-    "service_worker": "background.js"
+    "service_worker": "background.js",
+    "scripts": [
+      "advanced-rules.js",
+      "filters.js",
+      "core-filters.js",
+      "background.js"
+    ]
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "adblocker-pro-ultimate@local",
+      "strict_min_version": "128.0"
+    }
   },
   "icons": {
     "16": "icons/icon16.png",

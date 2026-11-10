@@ -50,7 +50,7 @@ const entry = manifest.content_scripts.find((item) =>
 
 check(Boolean(entry && entry.matches.length === 1 && entry.matches[0].includes("instagram.com")), "module is scoped only to Instagram");
 check(!/setInterval\s*\(/.test(source), "Instagram detector uses no permanent polling interval");
-check(source.includes("article[data-abp-instagram-ad='1']"), "only marked post containers are hidden");
+check(source.includes('data-abp-instagram-mode') && source.includes('"viewer"') && source.includes('"feed"'), "marked viewer cards preserve layout while feed ads use the separate collapse mode");
 check(source.includes("igSponsored"), "Instagram module binds to igSponsored toggle in storage");
 
 console.log("\n" + "=".repeat(64));

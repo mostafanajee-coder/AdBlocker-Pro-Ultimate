@@ -55,6 +55,9 @@ check((manifest.permissions || []).includes('contextMenus'), 'right-click "Block
 }
 check(!/innerHTML\s*=\s*["']<span>["']\s*\+\s*domain/.test(popup), 'the popup builds exception-list rows as text, never as HTML from the domain');
 check(manifest.minimum_chrome_version === '145', 'minimum Chrome version covers top-domain native regex rules');
+check(manifest.background && manifest.background.service_worker === 'background.js' && Array.isArray(manifest.background.scripts) && manifest.background.scripts.includes('background.js'), 'manifest supports both Chrome service_worker and Firefox background.scripts');
+check(manifest.browser_specific_settings && manifest.browser_specific_settings.gecko && manifest.browser_specific_settings.gecko.id, 'manifest includes Firefox gecko extension ID');
+check(background.includes('"twitter-main-script"') && background.includes('settings.twitterBlock !== false'), 'Twitter MAIN-world interceptor follows Twitter/global settings');
 
 console.log('\n' + '='.repeat(64));
 console.log(`  Settings wiring: ${passed} passed, ${failed} failed`);

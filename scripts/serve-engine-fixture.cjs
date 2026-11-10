@@ -3,6 +3,9 @@ const http = require("node:http"), fs = require("node:fs"), path = require("node
 const root = path.resolve(__dirname, "..");
 const files = new Map([
   ["/", [path.join(__dirname, "engine-browser-fixture.html"), "text/html"]],
+  ["/reels/instagram-test/", [path.join(__dirname, "instagram-reels-fixture.html"), "text/html"]],
+  ["/instagram.js", [path.join(root, "instagram.js"), "text/javascript"]],
+  ["/instagram-reels-fixture.js", [path.join(__dirname, "instagram-reels-fixture.js"), "text/javascript"]],
   ...["advanced-rules.js", "procedural-engine.js", "scriptlet-engine.js", "content.js"].map(name => ["/" + name, [path.join(root, name), "text/javascript"]]),
   ...["fixture-setup.js", "fixture-tests.js"].map(name => ["/" + name, [path.join(__dirname, name), "text/javascript"]])
 ]);

@@ -1,12 +1,26 @@
-# 🛡️ Ad Blocker Pro Ultimate (v5.5.2)
+# 🛡️ Ad Blocker Pro Ultimate (v5.5.5)
 
-[![Manifest V3](https://img.shields.io/badge/Chrome-Manifest%20V3-blue.svg)](https://developer.chrome.com/docs/extensions/mv3/intro/)
+[![Manifest V3](https://img.shields.io/badge/Chrome%20%26%20Firefox-Manifest%20V3-blue.svg)](https://developer.chrome.com/docs/extensions/mv3/intro/)
 [![Tests](https://img.shields.io/badge/Tests-local%20regressions-brightgreen.svg)](tests/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-A Manifest V3 ad blocker for Chromium browsers, with declarative network filtering, dedicated sponsored-content detectors, YouTube response sanitizing, optional anti-adblock hooks, and popunder suppression. Local regression checks verify the behaviors described below; they do not guarantee compatibility with every live site update.
+A Manifest V3 ad blocker for Chromium browsers and Mozilla Firefox, with declarative network filtering, dedicated sponsored-content detectors, YouTube response sanitizing, Twitter/X GraphQL & DOM promoted-tweet suppression, optional anti-adblock hooks, and popunder suppression. Local regression checks verify the behaviors described below; they do not guarantee compatibility with every live site update.
 
 ---
+
+## 🔧 v5.5.5 Firefox Support & Twitter / X Ad Blocking Overhaul
+
+- **Cross-Browser Manifest V3 (Chrome & Firefox)**: Added `background.scripts` alongside `background.service_worker` and `browser_specific_settings.gecko` in `manifest.json`, guarded `importScripts` in `background.js`, and respected Firefox's 5,000 dynamic DNR limit by retaining the 18,763 static rules in Firefox while installing dynamic regex and regional rules (`Liste AR`).
+- **Twitter / X Multi-Layer Promoted Slayer (`twitter-main.js`, `twitter.js`)**: Added a `MAIN`-world GraphQL sanitizer and React Fiber inspector (`twitter-main.js`) that strips promoted timeline entries and reply ads before rendering while preserving cursors, paired with an upgraded `twitter.js` featuring persistent CSS cell-collapse, recycled-cell recovery, Arabic diacritic/tashkeel normalization, `Promoted by ...` / `مُروّج بواسطة ...` prefix matching, `div[dir="ltr"|"rtl"]` badge scanning, and official Promoted SVG icon detection.
+- **Instagram Reels (`instagram.js`)**: Includes the 5.5.3–5.5.4 Reel disclosure and `Navigate to next Reel` detection improvements.
+
+## v5.5.3 Instagram Reels (local, unpublished)
+
+Instagram now recognizes single-video Reel containers beyond `article`, including qualified non-semantic wrappers. Labels must belong to an author/header/ad-info context; captions, comments and profile names are protected. First-party ad URLs are parsed rather than matched as substrings. Character-data and disclosure-attribute mutations detect delayed labels.
+
+Feed ads collapse separately. The active Reel stays mounted and sized, is covered and muted, and is never paused or forcibly resumed. Recycled organic content, opt-outs and whitelists restore owned markers/audio state. Initial storage settings must arrive before any effects occur; stale callbacks cannot override newer switches. Exact visible **Next reel** controls may receive one attempt only when hit-testing confirms the ad is the foreground card. Generic Next, synthetic keys and scroll fallbacks are not used for Reels. If no unambiguous native control exists, the ad remains covered until normal viewer navigation; completely imperceptible automatic skipping is not guaranteed.
+
+The change is tested locally with mocked DOM/media/storage. A real Chrome fixture is provided at `/reels/instagram-test/` by `node scripts/serve-engine-fixture.cjs`; it does not access an Instagram account. Live real-site coverage remains unverified after reloading this local build. No commit, push or release was authorized for this change.
 
 ## 🔧 v5.5.2 Facebook Fixes
 

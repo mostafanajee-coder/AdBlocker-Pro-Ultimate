@@ -837,7 +837,11 @@ const FILTERS = {
     const existing = await chrome.declarativeNetRequest.getDynamicRules();
     const foreign = existing.filter(rule => !FILTERS.isManagedRuleId(rule.id));
     const coreRules = coreSnapshot ? coreSnapshot.rules : [];
-    const budget = FILTERS.MAX_DYNAMIC_RULES - foreign.length - coreRules.length;
+    const nativeMaxDynamic = Number(chrome.declarativeNetRequest && chrome.declarativeNetRequest.MAX_NUMBER_OF_DYNAMIC_RULES);
+    const dynamicCeiling = (Number.isInteger(nativeMaxDynamic) && nativeMaxDynamic > 200)
+      ? Math.min(FILTERS.MAX_DYNAMIC_RULES, nativeMaxDynamic - 200)
+      : FILTERS.MAX_DYNAMIC_RULES;
+    const budget = dynamicCeiling - foreign.length - coreRules.length;
     const unsafe = coreRules.concat(foreign).filter(rule => !["block", "allow", "allowAllRequests", "upgradeScheme"].includes(rule.action.type)).length;
     const regexCount = coreRules.concat(foreign).filter(rule => rule.condition.regexFilter !== undefined).length;
     if (budget < 0 || (FILTERS.core && (unsafe > FILTERS.core.MAX_UNSAFE_RULES || regexCount > FILTERS.core.MAX_REGEX_RULES))) {
