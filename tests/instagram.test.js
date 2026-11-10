@@ -21,6 +21,9 @@ console.log("\nInstagram sponsored-label detection");
 console.log("-------------------------------------");
 
 check(IG.isSponsoredLabel("Sponsored"), "matches English Sponsored");
+check(IG.isSponsoredLabel("· Sponsored"), "matches bullet-prefixed · Sponsored");
+check(IG.isSponsoredLabel("• إعلان"), "matches bullet-prefixed • إعلان");
+check(IG.isSponsoredLabel("مُروَّج"), "normalizes and matches Arabic مُروَّج");
 check(!IG.isSponsoredLabel("Ad"), "rejects the ambiguous one-word English label");
 check(IG.isSponsoredLabel("مُموَّل"), "normalizes and matches Arabic مُموَّل");
 check(IG.isSponsoredLabel("إعلان"), "normalizes and matches Arabic إعلان");

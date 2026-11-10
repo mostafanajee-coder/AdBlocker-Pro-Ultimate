@@ -43,7 +43,9 @@
     "ytd-display-ad-renderer",
     "ytd-player-legacy-desktop-watch-ads-renderer",
     "ytd-companion-slot-renderer",
+    "ytd-action-companion-ad-renderer",
     "ytm-promoted-video-renderer",
+    "ytm-companion-ad-renderer",
     "#masthead-ad",
     ".ytp-ad-module",
     ".ytp-ad-overlay-container",
@@ -106,6 +108,7 @@
       "  pointer-events: none !important; display: block !important;\n" +
       "}\n" +
       prefix + "ytd-rich-item-renderer:has(ytd-ad-slot-renderer),\n" +
+      prefix + "ytd-reel-video-renderer:has(ytd-ad-slot-renderer),\n" +
       prefix + "ytd-item-section-renderer:has(ytd-in-feed-ad-layout-renderer) {\n" +
       "  display: none !important;\n" +
       "}";

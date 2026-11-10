@@ -1701,6 +1701,31 @@ section("39. Facebook's own SVG text is never rewritten", () => {
   check("an organic post is not hidden", isBlocked(post), false);
 });
 
+section("40. A Reel whose only disclosure is an empty aria-labelledby or SVG <use> node is covered and advanced", () => {
+  const h = createHarness();
+  h.window.location.pathname = "/reel/1";
+  const next = nextButton(h, "الانتقال إلى مقطع ريلز التالي", true);
+
+  const remote = h.doc.createElement("span");
+  remote.setAttribute("id", "reel-remote-ad-chip");
+  remote.appendChild(text(h, "Sponsored"));
+  h.doc.body.appendChild(remote);
+
+  const slide = h.doc.createElement("div");
+  slide.rect = { left: 0, top: 0, width: 400, height: 800 };
+  slide.setAttribute("data-pagelet", "ReelViewerRoot");
+  const video = stubVideo(h);
+  const chip = h.doc.createElement("span");
+  chip.setAttribute("aria-labelledby", "reel-remote-ad-chip"); // empty textContent
+  slide.append(video, chip);
+  h.main.appendChild(slide);
+
+  h.scheduler.tickInterval(0);
+  h.scheduler.flush();
+  check("remote aria-labelledby Reel disclosure covers the Reel", slide.getAttribute("data-abp-reel-cover"), "1");
+  check("Arabic Next Reel control advances the covered Reel once", next.__clicks, 1);
+});
+
 console.log(`\n${"=".repeat(64)}`);
 console.log(`  ${passed} passed, ${failed} failed`);
 console.log(`${"=".repeat(64)}`);

@@ -85,6 +85,7 @@ function environment(options = {}) {
 check(IG.isReelsPath("/reels/") && IG.isReelsPath("/reel/abc/"), "real Reel routes select the viewer path");
 check(!IG.isReelsPath("/reelshort/") && !IG.isReelsPath("/creator/reels/"), "profile tabs and reel-like usernames are not treated as the viewer");
 check(IG.isOfficialAdLink("https://www.instagram.com/ads/ig_redirect?x=1"), "recognizes a first-party Instagram ad redirect");
+check(IG.isOfficialAdLink("https://l.instagram.com/?u=https%3A%2F%2Fshop.example%2Fitem%3Ffbclid%3D1%26utm_medium%3Dpaid"), "recognizes an l.instagram.com campaign ad link");
 check(!IG.isOfficialAdLink("https://evil.test/?next=facebook.com/ads/about") && !IG.isOfficialAdLink("https://notfacebook.com/ads/about"), "URLs merely mentioning Meta ads do not prove an ad");
 check(!IG.isSponsoredLabel("Paid partnership helped my project"), "ordinary partnership sentences are not disclosure badges");
 
@@ -173,6 +174,22 @@ check(!IG.isSponsoredLabel("Paid partnership helped my project"), "ordinary part
   const e = environment(), ad = e.card(), control = e.body.appendChild(new e.Element("button", "", { "aria-label": "Next reel" }));
   ad.node.box = { top: 1200, bottom: 1700, height: 500, width: 350 }; IG.start(e.win); e.flush();
   check(control.clicks === 0, "preloaded offscreen ads never trigger navigation");
+  ad.node.box = { top: 80, bottom: 580, height: 500, width: 350 };
+  e.windowEvents.get("scroll")(); e.flush();
+  check(control.clicks === 1, "a preloaded Reel ad advances once when scrolled into the foreground");
+}
+{
+  const e = environment(), ad = e.card({ label: "· Ad", badgeTag: "div", badgeTop: 150 }), control = e.body.appendChild(new e.Element("button", "", { "aria-label": "الانتقال إلى مقطع ريلز التالي" }));
+  IG.start(e.win); e.flush();
+  check(ad.hidden() && control.clicks === 1, "bullet-prefixed · Ad disclosure and Arabic Next Reel navigation control are recognized");
+}
+{
+  const e = environment(), ad = e.card({ label: "" });
+  const remote = e.body.appendChild(new e.Element("span", "Sponsored", { id: "ig-remote-disclosure" }));
+  remote.box = { top: 0, bottom: 0, width: 0, height: 0 };
+  ad.badge.setAttribute("aria-labelledby", "ig-remote-disclosure");
+  IG.start(e.win); e.flush();
+  check(ad.hidden(), "remote aria-labelledby disclosure chip is resolved on Instagram");
 }
 {
   const e = environment(), ad = e.card(); IG.start(e.win); e.flush();

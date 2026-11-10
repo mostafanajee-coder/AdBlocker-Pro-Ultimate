@@ -80,16 +80,27 @@
   // list — kept in sync manually since this file runs in a separate world
   // and can't import that module).
   var SPONSORED_SHADOW_LABELS = [
-    "sponsored", "sponsored post", "ad", "promoted",
-    "مُموَّل", "ممول", "مموّل", "برعاية", "بِرعاية", "إعلان", "اعلان",
+    "sponsored", "sponsored post", "ad", "ads", "promoted",
+    "مُموَّل", "ممول", "مموّل", "برعاية", "بِرعاية", "إعلان", "اعلان", "محتوى ممول", "اعلان ممول",
     "paid partnership", "شراكة مدفوعة",
-    "sponsorisé", "commandité", "patrocinado", "publicidad",
+    "sponsorisé", "sponsorise", "commandité", "patrocinado", "publicidad",
     "gesponsert", "anzeige", "sponsorizzato", "sponsorlu",
     "bersponsor", "disponsori", "प्रायोजित", "সৌজন্যে",
     "được tài trợ", "赞助内容", "贊助", "スポンサー", "広告",
     "스폰서", "реклама", "спонсируется",
     "سپانسرڈ", "اسپانسر شده", "ממומן"
   ];
+
+  function normalizeShadowLabel(raw) {
+    return String(raw || "")
+      .replace(/[\u00AD\u034F\u061C\u115F\u1160\u17B4\u17B5\u180B-\u180F\u200B-\u200F\u202A-\u202E\u2060-\u206F\uFE00-\uFE0F\uFEFF]/g, "")
+      .replace(/[\u0610-\u061A\u0640\u064B-\u065F\u0670\u06D6-\u06ED]/g, "")
+      .replace(/[إأآٱ]/g, "ا")
+      .replace(/^[\s·•|:\-–—.]+|[\s·•|:\-–—.]+$/g, "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .toLowerCase();
+  }
 
   try {
     var __abpOrigAttachShadow = Element.prototype.attachShadow;
@@ -104,9 +115,9 @@
       function checkNow() {
         if (stopped) return false;
         var text;
-        try { text = (root.textContent || "").replace(/\s+/g, " ").trim(); } catch (_) { return false; }
+        try { text = normalizeShadowLabel(root.textContent); } catch (_) { return false; }
         if (!text) return false;
-        if (SPONSORED_SHADOW_LABELS.indexOf(text.toLowerCase()) === -1) return false;
+        if (SPONSORED_SHADOW_LABELS.indexOf(text) === -1) return false;
         try { host.dispatchEvent(new CustomEvent("__abpShadowSponsoredDetected", { bubbles: true })); } catch (_) {}
         return true;
       }

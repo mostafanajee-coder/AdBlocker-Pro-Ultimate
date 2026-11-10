@@ -18,7 +18,7 @@
   // Pirate-streaming hosts, where click-trap links are removed. Shahid (MBC's
   // legitimate service) used to be on this list.
   function isStreamingSite(host) {
-    return /faselhd|faselhdx|wecima|mycima|akwam|arabseed|egybest|egydead|cima|laroza|dood|vidmoly|streamtape/i.test(host);
+    return /faselhd|faselhdx|wecima|mycima|akwam|arabseed|egybest|egydead|cima|laroza|movizland|fushaar|shahed4u|shahid4u|tuktukcinema|dood|vidmoly|streamtape|dostream|vidbom|govad|vadbam|uqload/i.test(host);
   }
 
   function shouldSkip(target) {
@@ -61,6 +61,10 @@
       ".ad-banner, .ad-container, .ad-wrapper, .ad_box, .ad_unit,",
       "ins.adsbygoogle, .sponsored-post, .sponsored-content, [class*=\"sponsored\"],",
       '[id*="google_ads"], [id*="taboola"], [id*="outbrain"],',
+      'div[id^="div-gpt-ad"], div[id^="ad_position_"], div[class*="adsterra"], div[id*="adsterra"],',
+      'div[id^="propeller"], div[class^="propellerads"], div[id^="monetag"], div[class^="monetag"],',
+      'div[id^="exoclick"], ins[class*="exoclick"], div[id^="clickadu"], div[id^="hilltopads"],',
+      'iframe[src*="adsterra."], iframe[src*="propellerads."], iframe[src*="exoclick."], iframe[src*="popads."], iframe[src*="clickadu."], iframe[src*="monetag."],',
       // Video player ad overlays on streaming sites
       ".jw-ad-container, .jw-ad-break, .jw-ad-overlay, .jw-flag-ads,",
       ".vjs-ad-overlay, .vjs-ima3-ad-container, .vjs-ad-loading,",

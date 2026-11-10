@@ -45,6 +45,11 @@
     "videoMastheadAdV3Renderer",
     "playerLegacyDesktopWatchAdsRenderer",
     "mealbarPromoRenderer",
+    "statementBannerRenderer",
+    "bannerPromoRenderer",
+    "primetimePromoRenderer",
+    "actionCompanionAdRenderer",
+    "adPlacementRenderer",
     "enforcementMessageViewModel"
   ].forEach(function (key) { AD_RENDERER_KEYS[key] = true; });
   var AD_MARKER_KEYS = Object.keys(AD_KEYS).concat(Object.keys(AD_RENDERER_KEYS));
@@ -55,11 +60,9 @@
 
   function isShortsAdEntry(value) {
     try {
-      return Boolean(
-        value && value.command && value.command.reelWatchEndpoint &&
-        value.command.reelWatchEndpoint.adClientParams &&
-        value.command.reelWatchEndpoint.adClientParams.isAd === true
-      );
+      var ep = (value && value.command && value.command.reelWatchEndpoint) ||
+               (value && value.reelWatchEndpoint);
+      return Boolean(ep && ep.adClientParams && ep.adClientParams.isAd);
     } catch (_) {
       return false;
     }

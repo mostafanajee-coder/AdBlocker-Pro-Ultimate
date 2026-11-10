@@ -1,3 +1,27 @@
+# Ad Blocker Pro Ultimate v5.5.6
+
+Major enhancements for Instagram & Instagram Reels, Facebook & Facebook Reels, YouTube & Shorts, and general streaming/web sites across Chrome and Firefox.
+
+## Instagram & Instagram Reels (`instagram.js`)
+
+- **Preloaded Reel Auto-Advance Fix**: Fixes an issue where an Instagram Reel ad preloaded off-screen was covered and muted early, but did not trigger the explicit `Next Reel` button once the user scrolled it into the foreground (`(!state || !state.advanced)`).
+- **Bullet/Separator & Arabic Disclosure Normalization**: Strips leading and trailing separator dots/bullets (`· Sponsored`, `• Ad`, `Ad ·`, `· إعلان`, `· مُموَّل`) and adds broader Arabic/international sponsored labels (`مروج`, `اعلان مدفوع`, `محتوى اعلاني`, `Promoted`, `Annonce`, `Anzeige`, etc.).
+- **Remote `aria-labelledby` & Outbound `l.instagram.com` Ad Link Detection**: Resolves remote `aria-labelledby` disclosure chips on Instagram cards and detects `l.instagram.com/?u=` campaign ad links carrying `ad_id`, `adset_id`, `campaign_id`, or `fbclid` + `utm_medium`.
+- **Expanded Reel Navigation Labels**: Recognizes Arabic and multilingual explicit Reel navigation controls (`الانتقال إلى مقطع ريلز التالي`, `الانتقال إلى الريل التالي`, `مقطع ريلز التالي`, ` الفيديوهات التالية`, `Next card`, `Siguiente reel`, `Nächstes Reel`, etc.) while never clicking generic `Next` buttons.
+
+## Facebook & Facebook Reels (`facebook.js`, `fb-net-probe.js`)
+
+- **Reels `aria-labelledby` & SVG `<use>` Disclosure Fix**: Fixes `reelHasAdSignal` in `facebook.js` so empty `<span aria-labelledby="...">` and `<svg><use href="#..."></svg>` disclosure chips inside Facebook Reels are resolved via `readLabel` even when their direct `textContent` is empty, and hashes `aria-labelledby` targets in `reelDetectionSignature` for instant 60ms active-Reel detection.
+- **Hardened Closed Shadow DOM Probe (`fb-net-probe.js`)**: Strips `U+034F` Combining Grapheme Joiners, zero-width characters, Arabic diacritics/tashkeel, and separator dots (`·`, `•`) inside closed Shadow DOM roots before matching `SPONSORED_SHADOW_LABELS`.
+- **Expanded Reels CTA & Navigation Controls**: Adds Arabic and English commercial Reel CTA terms (`Order now`, `Buy now`, `Get quote`, `اطلب الآن`, `اشتر الآن`, `تصفح المتجر`, etc.) and full Arabic/multilingual `NEXT_REEL_LABEL` patterns.
+
+## YouTube, Shorts & General Sites (`youtube-sanitizer.js`, `youtube.js`, `content.js`, `inject.js`)
+
+- **YouTube & Shorts**: Expands `AD_RENDERER_KEYS` (`statementBannerRenderer`, `bannerPromoRenderer`, `primetimePromoRenderer`, `actionCompanionAdRenderer`, `adPlacementRenderer`), supports direct `reelWatchEndpoint` Shorts ad entries, and hides `ytd-reel-video-renderer:has(ytd-ad-slot-renderer)` in Shorts DOM.
+- **General & Streaming Sites**: Expands built-in cosmetic rules for Adsterra, PropellerAds, Monetag, ExoClick, Clickadu, HilltopAds, and GPT ad containers, and updates streaming popunder domain coverage.
+
+---
+
 # Ad Blocker Pro Ultimate v5.5.5
 
 Cross-browser Firefox & Chrome support from the same project folder, a multi-layer Twitter / X promoted content overhaul, and Instagram Reels disclosure improvements.

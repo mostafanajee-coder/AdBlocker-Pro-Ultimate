@@ -461,7 +461,7 @@
   // sit outside any single reel; a box containing them is the viewer. The
   // generic "Next" label is deliberately excluded from the advance action:
   // it can belong to unrelated dialogs or carousels.
-  var NEXT_REEL_LABEL = /^(next card|next reel|next video|البطاقة التالية|الريل التالي|الفيديو التالي)$/i;
+  var NEXT_REEL_LABEL = /^(?:(?:navigate\s+to\s+)?next\s+(?:card|reel|video)|بطاقة\s+تالية|البطاقة\s+التالية|الريل\s+التالي|الريلز\s+التالي|مقطع\s+ريلز\s+التالي|الفيديو\s+التالي|الانتقال\s+(?:إلى|الى)\s+(?:البطاقة\s+التالية|الريل\s+التالي|مقطع\s+ريلز\s+التالي)|reel\s+suivant|carte\s+suivante|siguiente\s+(?:reel|tarjeta)|nächstes\s+reel|nächste\s+karte|próximo\s+reel)$/i;
 
   function isActiveSlide(el) {
     try {
@@ -1292,10 +1292,12 @@
   var REEL_CTA_TERMS = D.normList([
     "Learn more", "Shop now", "Sign up", "Install now", "Download", "Play game",
     "Get offer", "Watch more", "Apply now", "Contact us", "Send message",
-    "Book now", "Open link", "Use app", "Play now",
+    "Book now", "Open link", "Use app", "Play now", "Order now", "Buy now",
+    "Get quote", "Get tickets", "See menu",
     "تعرف على المزيد", "تسوق الآن", "تسجيل", "تثبيت الآن", "تنزيل", "العب الآن",
     "احصل على العرض", "شاهد المزيد", "قدم الآن", "اتصل بنا", "إرسال رسالة",
-    "احجز الآن", "فتح الرابط", "استخدام التطبيق"
+    "احجز الآن", "فتح الرابط", "استخدام التطبيق", "اطلب الآن", "اشتر الآن",
+    "اشتري الآن", "احصل على عرض أسعار", "تصفح المتجر"
   ]);
 
   function reelCardOf(video) {
@@ -1356,11 +1358,14 @@
       }
     }
 
-    // Split/obfuscated labels, resolved the same way as in the feed.
-    els = card.querySelectorAll("span, a");
+    // Split/obfuscated labels, SVG <use> chains, and remote aria-labelledby chips.
+    els = card.querySelectorAll("span, a, div[aria-labelledby]");
     for (i = 0; i < els.length; i++) {
+      if (inCommentArea(els[i])) continue;
       t = els[i].textContent || "";
-      if (!t || t.length > 40 || inCommentArea(els[i])) continue;
+      var hasRef = Boolean((els[i].getAttribute && els[i].getAttribute("aria-labelledby")) ||
+                           (els[i].querySelector && els[i].querySelector("use, [aria-labelledby]")));
+      if ((!t && !hasRef) || t.length > 40) continue;
       var lab = readLabel(els[i]);
       if (lab && matchesAny(lab, SPONSORED)) return true;
     }
@@ -1433,6 +1438,17 @@
     add(card.textContent || "");
     var labelled = card.querySelectorAll("[aria-label]");
     for (var i = 0; i < labelled.length; i++) add(labelled[i].getAttribute("aria-label"));
+    var labelledBy = card.querySelectorAll("[aria-labelledby]");
+    for (var lb = 0; lb < labelledBy.length; lb++) {
+      var refIds = labelledBy[lb].getAttribute("aria-labelledby") || "";
+      add(refIds);
+      var parts = refIds.split(/\s+/);
+      for (var p = 0; p < parts.length; p++) {
+        if (!parts[p]) continue;
+        var refEl = document.getElementById(parts[p]);
+        if (refEl) add(refEl.textContent || "");
+      }
+    }
     var testIds = card.querySelectorAll("[data-testid]");
     for (var t = 0; t < testIds.length; t++) add(testIds[t].getAttribute("data-testid"));
     var links = card.querySelectorAll("a[href]");

@@ -1,7 +1,7 @@
 param([string]$Commit = 'HEAD', [string]$OutputDirectory = '')
 $ErrorActionPreference = 'Stop'
 $repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
-$resolvedCommit = (& git -C $repoRoot rev-parse --verify "$Commit^{commit}" | Select-Object -First 1)
+$resolvedCommit = (& git -C $repoRoot rev-parse --verify ($Commit + '^{commit}') | Select-Object -First 1)
 if ($LASTEXITCODE -ne 0 -or $resolvedCommit -notmatch '^[a-f0-9]{40}$') { throw 'Invalid release commit' }
 function Read-ReleaseBlob([string]$RelativePath) {
   if ($RelativePath -notmatch '^[A-Za-z0-9_./-]+$' -or $RelativePath.StartsWith('/') -or $RelativePath.Split('/') -contains '..') { throw 'Unsafe archive path' }

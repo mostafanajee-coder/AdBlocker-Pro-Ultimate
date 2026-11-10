@@ -6,8 +6,13 @@
   if (root && root.document) api.start(root);
 })(typeof self !== "undefined" ? self : this, function () {
   "use strict";
-  var LABELS = ["sponsored", "paid partnership", "advertisement", "ممول", "اعلان", "برعاية", "محتوى ممول",
-    "شراكة مدفوعة", "اعلان ممول", "sponsorise", "sponsorisé", "gesponsert", "publicidad", "patrocinado", "sponsorizzato", "реклама"];
+  var LABELS = ["sponsored", "paid partnership", "advertisement", "promoted", "ممول", "اعلان", "برعاية", "محتوى ممول",
+    "شراكة مدفوعة", "اعلان ممول", "اعلان مدفوع", "محتوى اعلاني", "مروج", "sponsorise", "sponsorisé", "gesponsert",
+    "publicidad", "patrocinado", "sponsorizzato", "реклама", "annonce", "anzeige", "sponsorowane", "스폰서", "広告", "赞助内容", "贊助"];
+  var NEXT_REEL_LABELS = ["next reel", "navigate to next reel", "next card", "navigate to next card",
+    "الريل التالي", "الريلز التالي", "مقطع ريلز التالي", "الفيديو التالي",
+    "الانتقال إلى الريل التالي", "الانتقال الى الريل التالي", "الانتقال إلى مقطع ريلز التالي", "الانتقال الى مقطع ريلز التالي",
+    "reel suivant", "siguiente reel", "nächstes reel", "próximo reel", "sonraki reel"].map(normalize);
   var CARDS = "article, [role='article'], [data-testid='reel'], [data-testid='reel-container'], [aria-roledescription='slide']";
   var BODY_TEXT = "figcaption, h1, [data-testid*='caption'], [data-testid*='comment'], [data-testid*='description'], [data-comment-id], [role='textbox'], [contenteditable='true']";
   var STRUCTURE = "html, body, main, nav, [role='main'], [role='feed'], [role='navigation']";
@@ -15,7 +20,7 @@
   function normalize(text) {
     return String(text || "").replace(/[\u200B-\u200F\u202A-\u202E\u2060-\u206F\u034F\uFEFF]/g, "")
       .replace(/[\u0610-\u061A\u064B-\u065F\u0670\u06D6-\u06ED]/g, "").replace(/ـ/g, "")
-      .replace(/[إأآٱ]/g, "ا").replace(/\s+/g, " ").trim().toLowerCase();
+      .replace(/[إأآٱ]/g, "ا").replace(/^[\s·•|:\-–—.]+|[\s·•|:\-–—.]+$/g, "").replace(/\s+/g, " ").trim().toLowerCase();
   }
   function isSponsoredLabel(text) {
     if (String(text || "").length > 512) return false;
@@ -27,9 +32,17 @@
   function parseUrl(value) { try { return new URL(value, "https://www.instagram.com/"); } catch (_) { return null; } }
   function isOfficialAdLink(value) {
     var url = parseUrl(value);
-    return !!(url && /^https?:$/.test(url.protocol) && /(^|\.)(instagram|facebook)\.com$/i.test(url.hostname) &&
-      (/^\/ads\/(?:ig_redirect|about)(?:\/|$)/i.test(url.pathname) || /^\/about\/ads(?:\/|$)/i.test(url.pathname) ||
-        (/(^|\.)instagram\.com$/i.test(url.hostname) && url.searchParams.get("enable_persistent_cta") === "true")));
+    if (!url || !/^https?:$/.test(url.protocol)) return false;
+    if (/^l\.instagram\.com$/i.test(url.hostname)) {
+      var target = url.searchParams.get("u") || "";
+      return /(?:[?&]|%3F|%26)(?:ad_id|adset_id|campaign_id)(?:=|%3D)/i.test(url.search + target) ||
+        (/fbclid/i.test(url.search + target) && /utm_medium/i.test(url.search + target));
+    }
+    return /(^|\.)(instagram|facebook)\.com$/i.test(url.hostname) &&
+      (/^\/ads\/(?:ig_redirect|about|preferences)(?:\/|$)/i.test(url.pathname) ||
+        /^\/ad_preferences(?:\/|$)/i.test(url.pathname) ||
+        /^\/about\/ads(?:\/|$)/i.test(url.pathname) ||
+        (/(^|\.)instagram\.com$/i.test(url.hostname) && url.searchParams.get("enable_persistent_cta") === "true"));
   }
   function isProfileLink(value) {
     var url = parseUrl(value);
@@ -120,14 +133,22 @@
       }
       return false;
     }
+    function resolveLabelledBy(node) {
+      var ids = attr(node, "aria-labelledby");
+      if (!ids || typeof doc.getElementById !== "function") return "";
+      return ids.split(/\s+/).map(function (id) {
+        var ref = id ? doc.getElementById(id) : null;
+        return ref ? (ref.textContent || "") : "";
+      }).join(" ").trim();
+    }
     function sponsored(card) {
       var owned = hidden.has(card);
       var links = all(card, "a[href]").slice(0, 120);
       if (links.some(function (link) { return !inBody(link, card) && visible(link, owned) && isOfficialAdLink(attr(link, "href")); })) return true;
-      var nodes = all(card, "span, a, div, [role='button'], [aria-label], [title]").slice(0, 600);
+      var nodes = all(card, "span, a, div, [role='button'], [aria-label], [aria-labelledby], [title]").slice(0, 600);
       return nodes.some(function (node) {
-        var text = node.textContent || "", label = attr(node, "aria-label") || attr(node, "title");
-        var shortAd = [label, text].some(function (value) { return value.length <= 10 && normalize(value) === "ad"; });
+        var text = node.textContent || "", label = attr(node, "aria-label") || attr(node, "title") || resolveLabelledBy(node);
+        var shortAd = [label, text].some(function (value) { return value.length <= 12 && normalize(value) === "ad"; });
         var disclosure = isSponsoredLabel(label) || isSponsoredLabel(text) || shortAd;
         if (!disclosure || !metadataLabel(node, card, shortAd) || !visible(node, owned)) return false;
         // Do not interpret a wrapper containing the caption as an ad badge.
@@ -192,14 +213,14 @@
         if (closest(control, "nav, [role='menu'], [data-testid*='comment']")) return false;
         var label = normalize(attr(control, "aria-label") || attr(control, "title") || control.textContent);
         if (!label) { var icon = all(control, "svg[aria-label]")[0]; label = normalize(icon && attr(icon, "aria-label")); }
-        return ["next reel", "navigate to next reel", "الريل التالي", "الريلز التالي", "reel suivant"].indexOf(label) !== -1;
+        return NEXT_REEL_LABELS.indexOf(label) !== -1;
       });
       return choices.length === 1 ? choices[0] : null;
     }
     function hide(card, mode) {
       var key = episode(card), state = hidden.get(card);
       if (state && (state.key !== key || state.mode !== mode)) { release(card); state = null; }
-      var next = !state && mode === "viewer" ? nextReel(card) : null;
+      var next = (!state || !state.advanced) && mode === "viewer" ? nextReel(card) : null;
       if (!state) {
         state = { key: key, mode: mode, media: new Map(), oldMark: card.getAttribute(MARK), oldMode: card.getAttribute(MODE),
           oldPosition: card.getAttribute(POSITION), positioned: false, advanced: false };
@@ -296,7 +317,7 @@
         if (timer !== null) cancel(timer); timer = null; pending.clear(); Array.from(hidden.keys()).forEach(release); return;
       }
       if (observer && doc.documentElement) observer.observe(doc.documentElement, { childList: true, subtree: true, characterData: true, attributes: true,
-        attributeFilter: ["aria-label", "title", "href", "src", "class", "style", "hidden", "data-ad-preview", MARK, MODE, POSITION] });
+        attributeFilter: ["aria-label", "aria-labelledby", "title", "href", "src", "class", "style", "hidden", "data-ad-preview", MARK, MODE, POSITION] });
       schedule(doc);
     }
     function readSettings() {

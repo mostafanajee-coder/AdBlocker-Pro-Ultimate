@@ -79,7 +79,7 @@
     // Streamlabs, player.vimeo.com and any embedded player; "shahid" matched
     // Shahid, MBC's legitimate streaming service.
     function isStreamingSite(host) {
-      return /faselhd|faselhdx|wecima|mycima|akwam|arabseed|egybest|egydead|cima|laroza/i.test(host);
+      return /faselhd|faselhdx|wecima|mycima|akwam|arabseed|egybest|egydead|cima|laroza|movizland|fushaar|shahed4u|shahid4u|tuktukcinema|dostream|vidbom|govad|vadbam|uqload/i.test(host);
     }
 
     function isBlankUrl(url) {
