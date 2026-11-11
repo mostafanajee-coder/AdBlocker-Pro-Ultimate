@@ -95,11 +95,16 @@ try {
   }
 } finally { $readback.Dispose() }
 $zipHash = (Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash.ToLowerInvariant()
+$xpiPath = Join-Path $OutputDirectory ('AdBlocker-Pro-Ultimate-v' + $version + '.xpi')
+Copy-Item -LiteralPath $zipPath -Destination $xpiPath -Force
+$rootXpiPath = Join-Path $repoRoot ('AdBlocker-Pro-Ultimate-v' + $version + '.xpi')
+Copy-Item -LiteralPath $zipPath -Destination $rootXpiPath -Force
 $sumsPath = Join-Path $OutputDirectory 'SHA256SUMS.txt'
-[System.IO.File]::WriteAllText($sumsPath, $zipHash + '  ' + [System.IO.Path]::GetFileName($zipPath) + "`n", $encoding)
+$sumsContent = $zipHash + '  ' + [System.IO.Path]::GetFileName($zipPath) + "`n" + $zipHash + '  ' + [System.IO.Path]::GetFileName($xpiPath) + "`n"
+[System.IO.File]::WriteAllText($sumsPath, $sumsContent, $encoding)
 $verificationPath = Join-Path $OutputDirectory 'PACKAGE_VERIFICATION.json'
-$verification = @{ version = $version; commit = $resolvedCommit; files = $paths.Count; zipSha256 = $zipHash;
+$verification = @{ version = $version; commit = $resolvedCommit; files = $paths.Count; zipSha256 = $zipHash; xpiSha256 = $zipHash;
   minimumChrome = $manifest.minimum_chrome_version; byteVerifiedAgainstCommit = $true; entries = $expected }
 [System.IO.File]::WriteAllText($verificationPath, ($verification | ConvertTo-Json -Depth 6), $encoding)
 [PSCustomObject]@{ Version = $version; Commit = $resolvedCommit; Files = $paths.Count;
-  ZipPath = $zipPath; Sha256 = $zipHash; SumsPath = $sumsPath; VerificationPath = $verificationPath } | ConvertTo-Json
+  ZipPath = $zipPath; XpiPath = $xpiPath; RootXpiPath = $rootXpiPath; Sha256 = $zipHash; SumsPath = $sumsPath; VerificationPath = $verificationPath } | ConvertTo-Json
